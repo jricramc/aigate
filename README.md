@@ -25,15 +25,8 @@ Done. All prompts and tool calls are scanned automatically.
 ### Any AI tool (Cursor, API scripts, etc.)
 
 ```bash
-sudo aigate setup    # one-time: installs CA cert for HTTPS interception
-aigate start         # start the proxy
-```
-
-Then in your shell (or add to `~/.bashrc`):
-
-```bash
-export HTTPS_PROXY=http://127.0.0.1:8080
-export HTTP_PROXY=http://127.0.0.1:8080
+aigate start                                    # starts proxy, auto-installs CA cert on first run
+export HTTPS_PROXY=http://127.0.0.1:8080        # add to ~/.bashrc to persist
 ```
 
 All AI API traffic is now scanned transparently. No code changes needed.

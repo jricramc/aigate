@@ -62,8 +62,16 @@ def start(port: int | None, mode: str | None, config_path: str | None):
     Path(config.log.file).expanduser().parent.mkdir(parents=True, exist_ok=True)
 
     if not is_cert_installed():
-        click.echo("⚠️  CA cert not found. Run 'aigate setup' first for HTTPS interception.")
-        click.echo()
+        click.echo("CA cert not found. Installing for HTTPS interception...")
+        click.echo("(This requires sudo — one-time only)\n")
+        from aigate.cert import install_cert
+        try:
+            for action in install_cert():
+                click.echo(f"   {action}")
+            click.echo()
+        except Exception as e:
+            click.echo(f"   Failed: {e}", err=True)
+            click.echo("   Run 'sudo aigate setup' manually.\n", err=True)
 
     click.echo(f"🛡️  AiGate v{__version__}")
     click.echo(f"   Mode:      {config.mode}")
