@@ -10,3 +10,5 @@ build/
 venv/
 *.log
 .aigate/
+PRD.md
+STRESS_TEST_REPORT.md
