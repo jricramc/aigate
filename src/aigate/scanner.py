@@ -28,7 +28,7 @@ class Finding:
 
 PATTERNS: dict[str, re.Pattern] = {
     "aws_keys": re.compile(
-        r"(?<![A-Za-z0-9/+=])(AKIA[0-9A-Z]{16})(?![A-Za-z0-9/+=])"
+        r"(?<![A-Za-z0-9/])(AKIA[0-9A-Z]{16})(?![A-Za-z0-9/+=])"
     ),
     "database_urls": re.compile(
         r"((?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp|mssql)"
@@ -67,7 +67,7 @@ PATTERNS: dict[str, re.Pattern] = {
         r"|AUTH_TOKEN|ACCESS_TOKEN|REFRESH_TOKEN"
         r"|GITHUB_TOKEN|GITLAB_TOKEN|SLACK_TOKEN"
         r"|PASSWORD|PASSWD|CREDENTIALS)"
-        r"=[\"']?[^\s\"']{8,}[\"']?)"
+        r"=[\"']?(?![<{])[^\s\"']{8,}[\"']?)"
     ),
     "gcp_service_accounts": re.compile(
         r'("type"\s*:\s*"service_account"[\s\S]{0,500}"private_key"\s*:\s*"[^"]+)'
@@ -79,7 +79,8 @@ PATTERNS: dict[str, re.Pattern] = {
 
 # Keywords that signal a nearby string might be a secret
 ENTROPY_KEYWORDS = re.compile(
-    r"(?:password|passwd|secret|token|api_key|apikey|auth|credential|private)"
+    r"(?:password|passwd|secret[_\-]?key|secret|auth_token|access_token|refresh_token"
+    r"|token|api_key|apikey|auth|credential|private[_\-]?key)"
     r"\s*[=:]\s*[\"']?([^\s\"']{12,})[\"']?",
     re.IGNORECASE,
 )
