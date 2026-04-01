@@ -5,8 +5,13 @@
 
 set -euo pipefail
 
+LOG_DIR="$HOME/.aigate"
+LOG_FILE="$LOG_DIR/scan.log"
+mkdir -p "$LOG_DIR"
+
 INPUT=$(cat)
 PROMPT=$(echo "$INPUT" | jq -r '.prompt // empty')
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
 
 if [ -z "$PROMPT" ]; then
   exit 0
@@ -18,10 +23,24 @@ RESULT=$(echo "$PROMPT" | aigate scan - -j 2>/dev/null) || true
 CLEAN=$(echo "$RESULT" | jq -r 'if .clean == false then "false" else "true" end')
 
 if [ "$CLEAN" = "false" ]; then
-  # Extract finding details for the error message
   DETAILS=$(echo "$RESULT" | jq -r '.findings[] | "  - [\(.rule)] \(.match_redacted)"')
-  echo "AiGate blocked this prompt — secrets detected:" >&2
+  TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+  # Log to file (JSON-lines)
+  echo "$RESULT" | jq -c \
+    --arg ts "$TIMESTAMP" \
+    --arg event "UserPromptSubmit" \
+    --arg session "$SESSION_ID" \
+    --arg action "block" \
+    '{timestamp: $ts, event: $event, session_id: $session, action: $action, findings: .findings}' \
+    >> "$LOG_FILE"
+
+  # Log to console
+  echo "" >&2
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+  echo "🛡️  AiGate BLOCKED prompt ($TIMESTAMP)" >&2
   echo "$DETAILS" >&2
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
   echo "" >&2
   echo "Remove the credentials from your prompt and try again." >&2
   exit 2

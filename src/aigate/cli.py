@@ -162,6 +162,42 @@ def uninstall_hook():
         click.echo("AiGate hooks were not installed.")
 
 
+@main.command()
+@click.option("--tail", "-n", "num_lines", type=int, default=20, help="Number of entries to show")
+@click.option("--follow", "-f", is_flag=True, help="Follow log output in real time")
+def logs(num_lines: int, follow: bool):
+    """View AiGate scan logs."""
+    log_file = Path.home() / ".aigate" / "scan.log"
+    if not log_file.exists():
+        click.echo("No logs yet. Logs will appear after AiGate blocks or detects a secret.")
+        return
+
+    if follow:
+        import subprocess
+        subprocess.run(["tail", "-f", str(log_file)])
+    else:
+        lines = log_file.read_text().strip().split("\n")
+        entries = lines[-num_lines:]
+        for line in entries:
+            try:
+                entry = json.loads(line)
+                ts = entry.get("timestamp", "?")
+                action = entry.get("action", "?")
+                event = entry.get("event", entry.get("provider", "proxy"))
+                tool = entry.get("tool", "")
+                findings = entry.get("findings", [])
+                rules = ", ".join(f.get("rule", "?") for f in findings)
+                redacted = ", ".join(f.get("match_redacted", "?") for f in findings)
+
+                label = f"{event}"
+                if tool:
+                    label += f"/{tool}"
+
+                click.echo(f"  {ts}  [{action.upper()}]  {label}  {rules}  {redacted}")
+            except json.JSONDecodeError:
+                click.echo(f"  {line}")
+
+
 @main.group()
 def allowlist():
     """Manage the allowlist for false positive suppression."""
