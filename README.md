@@ -14,7 +14,7 @@ Requires Python 3.11+ and `jq`.
 
 ## Usage
 
-### Claude Code (recommended)
+### Claude Code
 
 ```bash
 aigate install-hook
@@ -22,13 +22,21 @@ aigate install-hook
 
 Done. All prompts and tool calls are scanned automatically.
 
-### Other AI tools (Cursor, API scripts, etc.)
+### Any AI tool (Cursor, API scripts, etc.)
 
 ```bash
-aigate start
-export HTTP_PROXY=http://127.0.0.1:8080
-export HTTPS_PROXY=http://127.0.0.1:8080
+sudo aigate setup    # one-time: installs CA cert for HTTPS interception
+aigate start         # start the proxy
 ```
+
+Then in your shell (or add to `~/.bashrc`):
+
+```bash
+export HTTPS_PROXY=http://127.0.0.1:8080
+export HTTP_PROXY=http://127.0.0.1:8080
+```
+
+All AI API traffic is now scanned transparently. No code changes needed.
 
 ### Scan a file directly
 
@@ -56,7 +64,7 @@ Instead of blocking, redact mode rewrites the request before it reaches the AI:
 4. Saves the real secret to your local `.env` file
 5. Forwards the sanitized request — the AI never sees the real credential
 
-The AI writes code using environment variables automatically. Zero workflow disruption.
+The AI writes code using environment variables automatically.
 
 ## Logs
 
@@ -68,8 +76,8 @@ aigate logs -f       # live tail
 
 Log file: `~/.aigate/scan.log`
 
-## Uninstall hooks
+## Uninstall
 
 ```bash
-aigate uninstall-hook
+aigate uninstall-hook   # remove Claude Code hooks
 ```

@@ -21,11 +21,38 @@ def main():
 
 
 @main.command()
+def setup():
+    """One-time setup: install the CA cert so the proxy can inspect HTTPS traffic.
+
+    Requires sudo. After this, just set HTTPS_PROXY and everything works.
+    """
+    from aigate.cert import install_cert, is_cert_installed
+
+    if is_cert_installed():
+        click.echo("CA cert already exists. Reinstalling into trust store...")
+    else:
+        click.echo("Generating and installing mitmproxy CA certificate...")
+
+    try:
+        actions = install_cert()
+        click.echo()
+        for action in actions:
+            click.echo(f"   {action}")
+        click.echo("\n✅ Done. The proxy can now inspect HTTPS traffic.")
+    except Exception as e:
+        click.echo(f"\nError: {e}", err=True)
+        click.echo("You may need to run: sudo aigate setup", err=True)
+        sys.exit(1)
+
+
+@main.command()
 @click.option("--port", "-p", type=int, default=None, help="Proxy port (default: 8080)")
 @click.option("--mode", "-m", type=click.Choice(["block", "redact", "warn", "audit"]), default=None)
 @click.option("--config", "-c", "config_path", type=click.Path(), default=None)
 def start(port: int | None, mode: str | None, config_path: str | None):
     """Start the AiGate proxy."""
+    from aigate.cert import is_cert_installed
+
     config = Config.load(config_path)
     if port is not None:
         config.port = port
@@ -34,15 +61,19 @@ def start(port: int | None, mode: str | None, config_path: str | None):
 
     Path(config.log.file).expanduser().parent.mkdir(parents=True, exist_ok=True)
 
+    if not is_cert_installed():
+        click.echo("⚠️  CA cert not found. Run 'aigate setup' first for HTTPS interception.")
+        click.echo()
+
     click.echo(f"🛡️  AiGate v{__version__}")
     click.echo(f"   Mode:      {config.mode}")
     click.echo(f"   Proxy:     http://127.0.0.1:{config.port}")
     click.echo(f"   Providers: {', '.join(config.providers)}")
     click.echo(f"   Log:       {config.log.file}")
     click.echo()
-    click.echo("Configure your AI tool to use this proxy:")
-    click.echo(f"   export HTTP_PROXY=http://127.0.0.1:{config.port}")
+    click.echo("Point your AI tool at AiGate:")
     click.echo(f"   export HTTPS_PROXY=http://127.0.0.1:{config.port}")
+    click.echo(f"   export HTTP_PROXY=http://127.0.0.1:{config.port}")
     click.echo()
 
     from aigate.proxy import run_proxy

@@ -39,7 +39,6 @@ def _extract_prompt_text(body: dict) -> list[tuple[str, str]]:
                             if isinstance(sub, dict) and sub.get("type") == "text":
                                 texts.append((f"messages[{i}].content[{j}].content[{k}].text", sub.get("text", "")))
 
-    # System prompt
     system = body.get("system")
     if isinstance(system, str):
         texts.append(("system", system))
@@ -48,14 +47,12 @@ def _extract_prompt_text(body: dict) -> list[tuple[str, str]]:
             if isinstance(block, dict) and block.get("type") == "text":
                 texts.append((f"system[{i}].text", block.get("text", "")))
 
-    # OpenAI fallback: if no texts extracted yet, try simple messages
     if not texts and messages:
         for i, msg in enumerate(messages):
             content = msg.get("content")
             if isinstance(content, str):
                 texts.append((f"messages[{i}].content", content))
 
-    # OpenAI completions: prompt field
     prompt = body.get("prompt")
     if isinstance(prompt, str):
         texts.append(("prompt", prompt))
@@ -64,7 +61,6 @@ def _extract_prompt_text(body: dict) -> list[tuple[str, str]]:
             if isinstance(p, str):
                 texts.append((f"prompt[{i}]", p))
 
-    # Tool definitions
     for i, tool in enumerate(body.get("tools", [])):
         if not isinstance(tool, dict):
             continue
@@ -163,7 +159,6 @@ class AiGateAddon:
         for action in save_to_dotenv(result.redactions):
             ctx.log.info(f"  > {action}")
 
-        # Inject system instruction
         try:
             redacted_body = json.loads(flow.request.get_text())
         except (json.JSONDecodeError, ValueError):
