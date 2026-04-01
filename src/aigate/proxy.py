@@ -10,36 +10,34 @@ from mitmproxy.tools.dump import DumpMaster
 
 from aigate.config import Config
 from aigate.logger import log_detection
-from aigate.redactor import redact_text, save_to_dotenv, RedactResult
+from aigate.redactor import redact_text, save_to_dotenv
 from aigate.scanner import Finding, scan_text
 
 
 def _extract_prompt_text(body: dict) -> list[tuple[str, str]]:
-    """Extract text content from AI API request bodies.
-
-    Returns list of (location, text) tuples.
-    """
+    """Extract text content from AI API request bodies."""
     texts: list[tuple[str, str]] = []
-
-    # Anthropic Messages API
     messages = body.get("messages", [])
+
     for i, msg in enumerate(messages):
         content = msg.get("content")
         if isinstance(content, str):
             texts.append((f"messages[{i}].content", content))
         elif isinstance(content, list):
             for j, block in enumerate(content):
-                if isinstance(block, dict):
-                    if block.get("type") == "text":
-                        texts.append((f"messages[{i}].content[{j}].text", block.get("text", "")))
-                    elif block.get("type") == "tool_result":
-                        inner = block.get("content", "")
-                        if isinstance(inner, str):
-                            texts.append((f"messages[{i}].content[{j}].content", inner))
-                        elif isinstance(inner, list):
-                            for k, sub in enumerate(inner):
-                                if isinstance(sub, dict) and sub.get("type") == "text":
-                                    texts.append((f"messages[{i}].content[{j}].content[{k}].text", sub.get("text", "")))
+                if not isinstance(block, dict):
+                    continue
+                btype = block.get("type")
+                if btype == "text":
+                    texts.append((f"messages[{i}].content[{j}].text", block.get("text", "")))
+                elif btype == "tool_result":
+                    inner = block.get("content", "")
+                    if isinstance(inner, str):
+                        texts.append((f"messages[{i}].content[{j}].content", inner))
+                    elif isinstance(inner, list):
+                        for k, sub in enumerate(inner):
+                            if isinstance(sub, dict) and sub.get("type") == "text":
+                                texts.append((f"messages[{i}].content[{j}].content[{k}].text", sub.get("text", "")))
 
     # System prompt
     system = body.get("system")
@@ -50,14 +48,14 @@ def _extract_prompt_text(body: dict) -> list[tuple[str, str]]:
             if isinstance(block, dict) and block.get("type") == "text":
                 texts.append((f"system[{i}].text", block.get("text", "")))
 
-    # OpenAI-style: messages with role/content
+    # OpenAI fallback: if no texts extracted yet, try simple messages
     if not texts and messages:
         for i, msg in enumerate(messages):
             content = msg.get("content")
             if isinstance(content, str):
                 texts.append((f"messages[{i}].content", content))
 
-    # OpenAI: prompt field (completions)
+    # OpenAI completions: prompt field
     prompt = body.get("prompt")
     if isinstance(prompt, str):
         texts.append(("prompt", prompt))
@@ -66,44 +64,37 @@ def _extract_prompt_text(body: dict) -> list[tuple[str, str]]:
             if isinstance(p, str):
                 texts.append((f"prompt[{i}]", p))
 
-    # Tools / tool definitions may contain secrets in descriptions
-    tools = body.get("tools", [])
-    for i, tool in enumerate(tools):
-        desc = None
-        if isinstance(tool, dict):
-            desc = tool.get("description", "")
-            # Anthropic tool format
-            input_schema = tool.get("input_schema", {})
-            if isinstance(input_schema, dict):
-                desc = (desc or "") + " " + json.dumps(input_schema)
-            # OpenAI function format
-            func = tool.get("function", {})
-            if isinstance(func, dict):
-                desc = (desc or "") + " " + func.get("description", "")
-        if desc:
+    # Tool definitions
+    for i, tool in enumerate(body.get("tools", [])):
+        if not isinstance(tool, dict):
+            continue
+        desc = tool.get("description", "")
+        schema = tool.get("input_schema", {})
+        if isinstance(schema, dict):
+            desc = f"{desc} {json.dumps(schema)}"
+        func = tool.get("function", {})
+        if isinstance(func, dict):
+            desc = f"{desc} {func.get('description', '')}"
+        if desc.strip():
             texts.append((f"tools[{i}]", desc))
 
     return texts
 
 
 def _build_blocked_response(findings: list[Finding]) -> str:
-    """Build the JSON error response for blocked requests."""
-    primary = findings[0]
-    details = [
-        {
-            "rule": f.rule,
-            "match": f.redacted,
-            "location": f"{f.location}, offset {f.offset}" if f.location else f"offset {f.offset}",
-        }
-        for f in findings
-    ]
-    rule_names = {f.rule.replace("_", " ") for f in findings}
-    detected = ", ".join(sorted(rule_names))
+    rules = sorted({f.rule.replace("_", " ") for f in findings})
     return json.dumps({
         "error": {
             "type": "blocked_by_aigate",
-            "message": f"AiGate blocked this request: {detected} detected in prompt content",
-            "details": details,
+            "message": f"AiGate blocked this request: {', '.join(rules)} detected in prompt content",
+            "details": [
+                {
+                    "rule": f.rule,
+                    "match": f.redacted,
+                    "location": f"{f.location}, offset {f.offset}" if f.location else f"offset {f.offset}",
+                }
+                for f in findings
+            ],
             "action": "Remove the credential from your prompt and retry.",
         }
     })
@@ -117,16 +108,11 @@ class AiGateAddon:
         self.provider_hosts = set(config.providers)
 
     def request(self, flow: http.HTTPFlow) -> None:
-        host = flow.request.pretty_host
-        if host not in self.provider_hosts:
+        if flow.request.pretty_host not in self.provider_hosts:
             return
-
-        # Only scan POST requests with JSON bodies
         if flow.request.method != "POST":
             return
-
-        content_type = flow.request.headers.get("content-type", "")
-        if "json" not in content_type:
+        if "json" not in flow.request.headers.get("content-type", ""):
             return
 
         try:
@@ -134,77 +120,50 @@ class AiGateAddon:
         except (json.JSONDecodeError, ValueError):
             return
 
-        texts = _extract_prompt_text(body)
         all_findings: list[Finding] = []
-
-        for location, text in texts:
-            findings = scan_text(
-                text,
-                enabled_rules=self.config.rules,
-                allowlist=self.config.allowlist,
-            )
-            for f in findings:
+        for location, text in _extract_prompt_text(body):
+            for f in scan_text(text, enabled_rules=self.config.rules, allowlist=self.config.allowlist):
                 f.location = location
-            all_findings.extend(findings)
+                all_findings.append(f)
 
         if not all_findings:
             return
 
-        # Log the detection
         log_detection(
             self.config.log.file,
-            provider=host,
+            provider=flow.request.pretty_host,
             findings=all_findings,
             action=self.config.mode,
             request_url=flow.request.pretty_url,
         )
 
-        count = len(all_findings)
         rules = {f.rule for f in all_findings}
         ctx.log.warn(
-            f"[AiGate] {count} secret(s) detected ({', '.join(rules)}) "
-            f"→ action: {self.config.mode}"
+            f"[AiGate] {len(all_findings)} secret(s) detected ({', '.join(rules)}) "
+            f"-> action: {self.config.mode}"
         )
 
         if self.config.mode == "redact":
-            self._handle_redact(flow, body, all_findings)
+            self._handle_redact(flow, all_findings)
         elif self.config.mode == "block":
             flow.response = http.Response.make(
-                400,
-                _build_blocked_response(all_findings),
-                {"Content-Type": "application/json"},
+                400, _build_blocked_response(all_findings), {"Content-Type": "application/json"},
             )
         elif self.config.mode == "warn":
-            # Forward but print warning
             for f in all_findings:
-                ctx.log.warn(f"  ⚠ {f.rule}: {f.redacted} at {f.location}")
-        # audit mode: just log, no terminal output beyond the initial line
+                ctx.log.warn(f"  ! {f.rule}: {f.redacted} at {f.location}")
 
-    def _handle_redact(
-        self, flow: http.HTTPFlow, body: dict, findings: list[Finding]
-    ) -> None:
-        """Replace secrets with placeholders and inject system instructions."""
-        # Collect all text from the body for redaction
-        full_text = flow.request.get_text()
-        result = redact_text(full_text, findings)
-
-        # Replace the request body with the redacted version
+    def _handle_redact(self, flow: http.HTTPFlow, findings: list[Finding]) -> None:
+        result = redact_text(flow.request.get_text(), findings)
         flow.request.set_text(result.redacted_text)
 
-        # Log what was redacted
         for r in result.redactions:
-            ctx.log.warn(
-                f"  ✂ {r.finding.rule}: redacted → {r.placeholder} "
-                f"(use {r.env_var_name})"
-            )
+            ctx.log.warn(f"  ~ {r.finding.rule}: redacted -> {r.placeholder} (use {r.env_var_name})")
 
-        # Save secrets to .env
-        actions = save_to_dotenv(result.redactions)
-        for action in actions:
-            ctx.log.info(f"  📁 {action}")
+        for action in save_to_dotenv(result.redactions):
+            ctx.log.info(f"  > {action}")
 
-        # Now inject system instruction into the request body
-        # Re-parse the redacted body to add the system prompt
+        # Inject system instruction
         try:
             redacted_body = json.loads(flow.request.get_text())
         except (json.JSONDecodeError, ValueError):
@@ -214,11 +173,10 @@ class AiGateAddon:
         if not instruction:
             return
 
-        # Inject into system prompt (works for both Anthropic and OpenAI)
-        existing_system = redacted_body.get("system")
-        if isinstance(existing_system, str):
-            redacted_body["system"] = existing_system + "\n\n" + instruction
-        elif isinstance(existing_system, list):
+        existing = redacted_body.get("system")
+        if isinstance(existing, str):
+            redacted_body["system"] = f"{existing}\n\n{instruction}"
+        elif isinstance(existing, list):
             redacted_body["system"].append({"type": "text", "text": instruction})
         else:
             redacted_body["system"] = instruction
@@ -227,15 +185,9 @@ class AiGateAddon:
 
 
 async def run_proxy(config: Config) -> None:
-    """Start the mitmproxy-based proxy."""
-    opts = Options(
-        listen_host="127.0.0.1",
-        listen_port=config.port,
-        mode=[f"regular"],
-    )
+    opts = Options(listen_host="127.0.0.1", listen_port=config.port, mode=["regular"])
     master = DumpMaster(opts)
     master.addons.add(AiGateAddon(config))
-
     try:
         await master.run()
     except KeyboardInterrupt:

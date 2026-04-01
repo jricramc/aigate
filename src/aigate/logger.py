@@ -1,9 +1,8 @@
-"""JSON logger for scan detections."""
+"""JSON-lines logger for scan detections."""
 
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,7 +17,6 @@ def log_detection(
     action: str,
     request_url: str = "",
 ) -> None:
-    """Append a JSON-lines log entry for a detection event."""
     path = Path(log_file).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -28,12 +26,7 @@ def log_detection(
         "request_url": request_url,
         "action": action,
         "findings": [
-            {
-                "rule": f.rule,
-                "match_redacted": f.redacted,
-                "offset": f.offset,
-                "location": f.location,
-            }
+            {"rule": f.rule, "match_redacted": f.redacted, "offset": f.offset, "location": f.location}
             for f in findings
         ],
     }

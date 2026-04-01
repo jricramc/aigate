@@ -7,6 +7,8 @@ import math
 import re
 from dataclasses import dataclass
 
+_ALNUM = r"A-Za-z0-9"
+
 
 @dataclass
 class Finding:
@@ -19,16 +21,12 @@ class Finding:
     def redacted(self) -> str:
         if len(self.match) <= 8:
             return "****"
-        return self.match[:4] + "****...****" + self.match[-4:]
+        return f"{self.match[:4]}****...****{self.match[-4:]}"
 
-
-# ---------------------------------------------------------------------------
-# Pattern definitions
-# ---------------------------------------------------------------------------
 
 PATTERNS: dict[str, re.Pattern] = {
     "aws_keys": re.compile(
-        r"(?<![A-Za-z0-9/])(AKIA[0-9A-Z]{16})(?![A-Za-z0-9/+=])"
+        rf"(?<![{_ALNUM}/])(AKIA[0-9A-Z]{{16}})(?![{_ALNUM}/+=])"
     ),
     "database_urls": re.compile(
         r"((?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp|mssql)"
@@ -40,24 +38,18 @@ PATTERNS: dict[str, re.Pattern] = {
         r"-----END (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----)"
     ),
     "api_tokens": re.compile(
-        r"(?<![A-Za-z0-9_\-])"
-        r"("
-        r"sk-proj-[A-Za-z0-9_\-]{20,}"  # OpenAI project keys
-        r"|sk-[A-Za-z0-9]{20,}"  # OpenAI / generic sk- keys
-        r"|ghp_[A-Za-z0-9]{36,}"  # GitHub PAT
-        r"|gho_[A-Za-z0-9]{36,}"  # GitHub OAuth
-        r"|ghu_[A-Za-z0-9]{36,}"  # GitHub user-to-server
-        r"|ghs_[A-Za-z0-9]{36,}"  # GitHub server-to-server
-        r"|github_pat_[A-Za-z0-9_]{22,}"  # GitHub fine-grained PAT
-        r"|glpat-[A-Za-z0-9\-_]{20,}"  # GitLab PAT
-        r"|xoxb-[A-Za-z0-9\-]+"  # Slack bot token
-        r"|xoxp-[A-Za-z0-9\-]+"  # Slack user token
-        r"|xapp-[A-Za-z0-9\-]+"  # Slack app token
-        r"|sk-ant-[A-Za-z0-9\-_]{20,}"  # Anthropic API key
-        r"|SG\.[A-Za-z0-9_\-]{22,}\.[A-Za-z0-9_\-]{22,}"  # SendGrid
-        r"|sq0atp-[A-Za-z0-9\-_]{22,}"  # Square access token
-        r")"
-        r"(?![A-Za-z0-9_\-])"
+        rf"(?<![{_ALNUM}_\-])("
+        r"sk-proj-[A-Za-z0-9_\-]{20,}"
+        r"|sk-[A-Za-z0-9]{20,}"
+        r"|gh[pous]_[A-Za-z0-9]{36,}"
+        r"|github_pat_[A-Za-z0-9_]{22,}"
+        r"|glpat-[A-Za-z0-9\-_]{20,}"
+        r"|xox[bp]-[A-Za-z0-9\-]+"
+        r"|xapp-[A-Za-z0-9\-]+"
+        r"|sk-ant-[A-Za-z0-9\-_]{20,}"
+        r"|SG\.[A-Za-z0-9_\-]{22,}\.[A-Za-z0-9_\-]{22,}"
+        r"|sq0atp-[A-Za-z0-9\-_]{22,}"
+        rf")(?![{_ALNUM}_\-])"
     ),
     "env_files": re.compile(
         r"(?:^|\n)"
@@ -73,11 +65,10 @@ PATTERNS: dict[str, re.Pattern] = {
         r'("type"\s*:\s*"service_account"[\s\S]{0,500}"private_key"\s*:\s*"[^"]+)'
     ),
     "tailscale_keys": re.compile(
-        r"(?<![A-Za-z0-9_\-])(tskey-(?:auth|api)-[A-Za-z0-9\-_]{16,})(?![A-Za-z0-9_\-])"
+        rf"(?<![{_ALNUM}_\-])(tskey-(?:auth|api)-[{_ALNUM}\-_]{{16,}})(?![{_ALNUM}_\-])"
     ),
 }
 
-# Keywords that signal a nearby string might be a secret
 ENTROPY_KEYWORDS = re.compile(
     r"(?:password|passwd|secret[_\-]?key|secret|auth_token|access_token|refresh_token"
     r"|token|api_key|apikey|auth|credential|private[_\-]?key)"
@@ -91,11 +82,11 @@ ENTROPY_THRESHOLD = 3.5
 def shannon_entropy(s: str) -> float:
     if not s:
         return 0.0
+    length = len(s)
     freq: dict[str, int] = {}
     for c in s:
         freq[c] = freq.get(c, 0) + 1
-    length = len(s)
-    return -sum((count / length) * math.log2(count / length) for count in freq.values())
+    return -sum((n / length) * math.log2(n / length) for n in freq.values())
 
 
 def scan_text(
@@ -105,40 +96,29 @@ def scan_text(
     allowlist: list[str] | None = None,
 ) -> list[Finding]:
     """Scan text for secrets. Returns list of findings."""
-    findings: list[Finding] = []
-    enabled = enabled_rules or {rule: True for rule in PATTERNS}
+    enabled = enabled_rules or {r: True for r in PATTERNS}
     allowed = allowlist or []
 
     def is_allowed(value: str) -> bool:
-        return any(fnmatch.fnmatch(value, pattern) for pattern in allowed)
+        return any(fnmatch.fnmatch(value, p) for p in allowed)
 
-    # Run regex patterns
-    for rule_name, pattern in PATTERNS.items():
-        if not enabled.get(rule_name, True):
+    findings: list[Finding] = []
+
+    for rule, pattern in PATTERNS.items():
+        if not enabled.get(rule, True):
             continue
         for m in pattern.finditer(text):
             value = m.group(1) if m.lastindex else m.group(0)
-            if is_allowed(value):
-                continue
-            findings.append(Finding(
-                rule=rule_name,
-                match=value,
-                offset=m.start(),
-            ))
+            if not is_allowed(value):
+                findings.append(Finding(rule=rule, match=value, offset=m.start()))
 
-    # Entropy-based detection
     if enabled.get("entropy_secrets", True):
         for m in ENTROPY_KEYWORDS.finditer(text):
             value = m.group(1)
             if is_allowed(value) or shannon_entropy(value) < ENTROPY_THRESHOLD:
                 continue
-            # Don't double-report if already caught by another rule
             if any(value in f.match or f.match in value for f in findings):
                 continue
-            findings.append(Finding(
-                rule="entropy_secrets",
-                match=value,
-                offset=m.start(1),
-            ))
+            findings.append(Finding(rule="entropy_secrets", match=value, offset=m.start(1)))
 
     return findings
