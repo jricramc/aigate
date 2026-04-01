@@ -37,6 +37,27 @@ aigate scan .env
 cat prompt.txt | aigate scan -
 ```
 
+## Modes
+
+```bash
+aigate start --mode block    # Block requests containing secrets (default)
+aigate start --mode redact   # Replace secrets with env var placeholders
+aigate start --mode warn     # Forward but log a warning
+aigate start --mode audit    # Forward silently, log only
+```
+
+### Redact mode
+
+Instead of blocking, redact mode rewrites the request before it reaches the AI:
+
+1. Detects secrets in your prompt
+2. Replaces them with placeholders like `[REDACTED_AWS_ACCESS_KEY_ID]`
+3. Injects a system instruction telling the AI to use `os.environ[]` instead
+4. Saves the real secret to your local `.env` file
+5. Forwards the sanitized request — the AI never sees the real credential
+
+The AI writes code using environment variables automatically. Zero workflow disruption.
+
 ## Logs
 
 ```bash
