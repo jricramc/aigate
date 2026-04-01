@@ -82,7 +82,7 @@ def _build_blocked_response(findings: list[Finding]) -> str:
     return json.dumps({
         "error": {
             "type": "blocked_by_aigate",
-            "message": f"AiGate blocked this request: {', '.join(rules)} detected in prompt content",
+            "message": f"aigate blocked this request: {', '.join(rules)} detected in prompt content",
             "details": [
                 {
                     "rule": f.rule,
@@ -96,7 +96,7 @@ def _build_blocked_response(findings: list[Finding]) -> str:
     })
 
 
-class AiGateAddon:
+class AigateAddon:
     """mitmproxy addon that scans AI API requests for secrets."""
 
     def __init__(self, config: Config):
@@ -135,7 +135,7 @@ class AiGateAddon:
 
         rules = {f.rule for f in all_findings}
         ctx.log.warn(
-            f"[AiGate] {len(all_findings)} secret(s) detected ({', '.join(rules)}) "
+            f"[aigate] {len(all_findings)} secret(s) detected ({', '.join(rules)}) "
             f"-> action: {self.config.mode}"
         )
 
@@ -182,7 +182,7 @@ class AiGateAddon:
 async def run_proxy(config: Config) -> None:
     opts = Options(listen_host="127.0.0.1", listen_port=config.port, mode=["regular"])
     master = DumpMaster(opts)
-    master.addons.add(AiGateAddon(config))
+    master.addons.add(AigateAddon(config))
     try:
         await master.run()
     except KeyboardInterrupt:

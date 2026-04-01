@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AiGate Claude Code Hook — UserPromptSubmit
+# aigate Claude Code Hook — UserPromptSubmit
 # Scans the user's prompt for secrets before Claude processes it.
 # Exit 0 = allow, Exit 2 = block (stderr shown to Claude as feedback)
 
@@ -38,7 +38,7 @@ if [ "$CLEAN" = "false" ]; then
   # Log to console
   echo "" >&2
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
-  echo "🛡️  AiGate BLOCKED prompt ($TIMESTAMP)" >&2
+  echo "🛡️  aigate BLOCKED prompt ($TIMESTAMP)" >&2
   echo "$DETAILS" >&2
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
   echo "" >&2

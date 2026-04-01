@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AiGate Claude Code Hook — PreToolUse
+# aigate Claude Code Hook — PreToolUse
 # Scans tool inputs for secrets before the tool executes.
 # Returns JSON with permissionDecision: deny if secrets are found.
 
@@ -41,7 +41,7 @@ if [ "$CLEAN" = "false" ]; then
   # Log to console
   echo "" >&2
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
-  echo "🛡️  AiGate DENIED $TOOL_NAME ($TIMESTAMP)" >&2
+  echo "🛡️  aigate DENIED $TOOL_NAME ($TIMESTAMP)" >&2
   echo "$DETAILS" >&2
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
   echo "" >&2
@@ -54,7 +54,7 @@ if [ "$CLEAN" = "false" ]; then
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
-        permissionDecisionReason: ("AiGate: secrets detected in " + $tool + " input (" + $findings + "). Remove credentials and retry.")
+        permissionDecisionReason: ("aigate: secrets detected in " + $tool + " input (" + $findings + "). Remove credentials and retry.")
       }
     }'
   exit 0

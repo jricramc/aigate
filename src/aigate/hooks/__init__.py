@@ -1,4 +1,4 @@
-"""Claude Code hook integration for AiGate."""
+"""Claude Code hook integration for aigate."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-# AiGate
+# aigate
 
 Local secret scanner that blocks credentials before they reach AI APIs.
 

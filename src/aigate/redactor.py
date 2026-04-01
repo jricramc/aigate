@@ -135,7 +135,7 @@ def save_to_dotenv(redactions: list[Redaction], env_path: str | Path = ".env") -
             if existing_content and not existing_content.endswith("\n"):
                 f.write("\n")
             if not existing_content:
-                f.write("# Secrets extracted by AiGate\n")
+                f.write("# Secrets extracted by aigate\n")
             f.write("\n".join(new_lines) + "\n")
 
     return actions

@@ -1,4 +1,4 @@
-"""Stress tests for AiGate scanner, redactor, and proxy components."""
+"""Stress tests for aigate scanner, redactor, and proxy components."""
 
 import json
 import os

@@ -1,4 +1,4 @@
-"""AiGate CLI — AI Prompt Secret Scanner."""
+"""aigate CLI — AI Prompt Secret Scanner."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from aigate.scanner import scan_text
 @click.group()
 @click.version_option(version=__version__, prog_name="aigate")
 def main():
-    """AiGate — scan and block secrets before they reach AI APIs."""
+    """aigate — scan and block secrets before they reach AI APIs."""
 
 
 @main.command()
@@ -50,7 +50,7 @@ def setup():
 @click.option("--mode", "-m", type=click.Choice(["block", "redact", "warn", "audit"]), default=None)
 @click.option("--config", "-c", "config_path", type=click.Path(), default=None)
 def start(port: int | None, mode: str | None, config_path: str | None):
-    """Start the AiGate proxy."""
+    """Start the aigate proxy."""
     from aigate.cert import is_cert_installed
 
     config = Config.load(config_path)
@@ -73,13 +73,13 @@ def start(port: int | None, mode: str | None, config_path: str | None):
             click.echo(f"   Failed: {e}", err=True)
             click.echo("   Run 'sudo aigate setup' manually.\n", err=True)
 
-    click.echo(f"🛡️  AiGate v{__version__}")
+    click.echo(f"🛡️  aigate v{__version__}")
     click.echo(f"   Mode:      {config.mode}")
     click.echo(f"   Proxy:     http://127.0.0.1:{config.port}")
     click.echo(f"   Providers: {', '.join(config.providers)}")
     click.echo(f"   Log:       {config.log.file}")
     click.echo()
-    click.echo("Point your AI tool at AiGate:")
+    click.echo("Point your AI tool at aigate:")
     click.echo(f"   export HTTPS_PROXY=http://127.0.0.1:{config.port}")
     click.echo(f"   export HTTP_PROXY=http://127.0.0.1:{config.port}")
     click.echo()
@@ -139,17 +139,17 @@ def init(output_path: str):
     if path.exists():
         click.echo(f"Config already exists: {path}")
         sys.exit(1)
-    path.write_text(f"# AiGate configuration\n{default_config_yaml()}")
+    path.write_text(f"# aigate configuration\n{default_config_yaml()}")
     click.echo(f"✅ Created {path}")
 
 
 @main.command("install-hook")
 def install_hook():
-    """Install AiGate as a Claude Code hook (recommended)."""
+    """Install aigate as a Claude Code hook (recommended)."""
     from aigate.hooks import install_hooks
 
     actions = install_hooks()
-    click.echo("🛡️  AiGate Claude Code integration installed:\n")
+    click.echo("🛡️  aigate Claude Code integration installed:\n")
     for action in actions:
         click.echo(f"   {action}")
     click.echo("\nDone. All prompts and tool inputs are now scanned automatically.")
@@ -158,23 +158,23 @@ def install_hook():
 
 @main.command("uninstall-hook")
 def uninstall_hook():
-    """Remove AiGate Claude Code hooks."""
+    """Remove aigate Claude Code hooks."""
     from aigate.hooks import uninstall_hooks
 
     actions = uninstall_hooks()
     if actions:
-        click.echo("Removed AiGate from Claude Code:\n")
+        click.echo("Removed aigate from Claude Code:\n")
         for action in actions:
             click.echo(f"   {action}")
     else:
-        click.echo("AiGate hooks were not installed.")
+        click.echo("aigate hooks were not installed.")
 
 
 @main.command()
 @click.option("--tail", "-n", "num_lines", type=int, default=20, help="Number of entries to show")
 @click.option("--follow", "-f", is_flag=True, help="Follow log output in real time")
 def logs(num_lines: int, follow: bool):
-    """View AiGate scan logs."""
+    """View aigate scan logs."""
     log_file = Path.home() / ".aigate" / "scan.log"
     if not log_file.exists():
         click.echo("No logs yet.")
