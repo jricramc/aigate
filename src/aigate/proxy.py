@@ -10,6 +10,7 @@ from mitmproxy.tools.dump import DumpMaster
 
 from aigate.config import Config
 from aigate.logger import log_detection
+from aigate.redactor import redact_text, save_to_dotenv, RedactResult
 from aigate.scanner import Finding, scan_text
 
 
@@ -165,7 +166,9 @@ class AiGateAddon:
             f"→ action: {self.config.mode}"
         )
 
-        if self.config.mode == "block":
+        if self.config.mode == "redact":
+            self._handle_redact(flow, body, all_findings)
+        elif self.config.mode == "block":
             flow.response = http.Response.make(
                 400,
                 _build_blocked_response(all_findings),
@@ -176,6 +179,51 @@ class AiGateAddon:
             for f in all_findings:
                 ctx.log.warn(f"  ⚠ {f.rule}: {f.redacted} at {f.location}")
         # audit mode: just log, no terminal output beyond the initial line
+
+    def _handle_redact(
+        self, flow: http.HTTPFlow, body: dict, findings: list[Finding]
+    ) -> None:
+        """Replace secrets with placeholders and inject system instructions."""
+        # Collect all text from the body for redaction
+        full_text = flow.request.get_text()
+        result = redact_text(full_text, findings)
+
+        # Replace the request body with the redacted version
+        flow.request.set_text(result.redacted_text)
+
+        # Log what was redacted
+        for r in result.redactions:
+            ctx.log.warn(
+                f"  ✂ {r.finding.rule}: redacted → {r.placeholder} "
+                f"(use {r.env_var_name})"
+            )
+
+        # Save secrets to .env
+        actions = save_to_dotenv(result.redactions)
+        for action in actions:
+            ctx.log.info(f"  📁 {action}")
+
+        # Now inject system instruction into the request body
+        # Re-parse the redacted body to add the system prompt
+        try:
+            redacted_body = json.loads(flow.request.get_text())
+        except (json.JSONDecodeError, ValueError):
+            return
+
+        instruction = result.system_instruction
+        if not instruction:
+            return
+
+        # Inject into system prompt (works for both Anthropic and OpenAI)
+        existing_system = redacted_body.get("system")
+        if isinstance(existing_system, str):
+            redacted_body["system"] = existing_system + "\n\n" + instruction
+        elif isinstance(existing_system, list):
+            redacted_body["system"].append({"type": "text", "text": instruction})
+        else:
+            redacted_body["system"] = instruction
+
+        flow.request.set_text(json.dumps(redacted_body))
 
 
 async def run_proxy(config: Config) -> None:

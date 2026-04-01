@@ -29,7 +29,7 @@ def main():
 @click.option("--port", "-p", type=int, default=None, help="Proxy port (default: 8080)")
 @click.option(
     "--mode", "-m",
-    type=click.Choice(["block", "warn", "audit"]),
+    type=click.Choice(["block", "redact", "warn", "audit"]),
     default=None,
     help="Scanning mode (default: block)",
 )
