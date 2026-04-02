@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
+import os
 import platform
 import subprocess
 from pathlib import Path
 
 MITMPROXY_CA = Path.home() / ".mitmproxy" / "mitmproxy-ca-cert.pem"
 
+ENV_LINES = [
+    '# aigate: trust mitmproxy CA for HTTPS interception',
+    f'export NODE_EXTRA_CA_CERTS="{MITMPROXY_CA}"',
+    f'export REQUESTS_CA_BUNDLE="{MITMPROXY_CA}"',
+]
+
+ENV_MARKER = "# aigate: trust mitmproxy CA"
+
 
 def _generate_cert_if_needed() -> None:
-    """Run mitmdump briefly to generate the CA cert if it doesn't exist."""
     if MITMPROXY_CA.exists():
         return
     subprocess.run(
@@ -19,8 +27,34 @@ def _generate_cert_if_needed() -> None:
     )
 
 
+def _shell_profile() -> Path:
+    """Find the user's shell profile file."""
+    shell = os.environ.get("SHELL", "")
+    if "zsh" in shell:
+        return Path.home() / ".zshrc"
+    return Path.home() / ".bashrc"
+
+
+def _add_to_shell_profile() -> list[str]:
+    """Add cert env vars to shell profile if not already there."""
+    profile = _shell_profile()
+    actions: list[str] = []
+
+    if profile.exists():
+        content = profile.read_text()
+        if ENV_MARKER in content:
+            actions.append(f"Shell env vars already in {profile.name}")
+            return actions
+
+    with open(profile, "a") as f:
+        f.write("\n" + "\n".join(ENV_LINES) + "\n")
+
+    actions.append(f"Added NODE_EXTRA_CA_CERTS to {profile.name}")
+    actions.append(f"Added REQUESTS_CA_BUNDLE to {profile.name}")
+    return actions
+
+
 def is_cert_installed() -> bool:
-    """Check if the mitmproxy CA cert is trusted by the system."""
     if not MITMPROXY_CA.exists():
         return False
 
@@ -34,19 +68,15 @@ def is_cert_installed() -> bool:
         return "mitmproxy" in result.stdout
 
     elif system == "Linux":
-        # Check if our cert is in the CA bundle
-        ca_dest = Path("/usr/local/share/ca-certificates/mitmproxy-aigate.crt")
-        if ca_dest.exists():
+        if Path("/usr/local/share/ca-certificates/mitmproxy-aigate.crt").exists():
             return True
-        ca_dest = Path("/etc/pki/ca-trust/source/anchors/mitmproxy-aigate.pem")
-        if ca_dest.exists():
+        if Path("/etc/pki/ca-trust/source/anchors/mitmproxy-aigate.pem").exists():
             return True
 
     return False
 
 
 def install_cert() -> list[str]:
-    """Install the mitmproxy CA cert into the system trust store."""
     actions: list[str] = []
 
     _generate_cert_if_needed()
@@ -81,5 +111,8 @@ def install_cert() -> list[str]:
     else:
         return [f"Error: unsupported OS ({system}). Manually install {MITMPROXY_CA}"]
 
+    # Add env vars to shell profile for Node.js and Python
+    actions.extend(_add_to_shell_profile())
     actions.append(f"Cert location: {MITMPROXY_CA}")
+    actions.append("Run 'source ~/.bashrc' or open a new terminal for env vars to take effect")
     return actions
