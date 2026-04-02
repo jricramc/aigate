@@ -17,6 +17,7 @@ RUN cp /root/.mitmproxy/mitmproxy-ca-cert.pem /usr/local/share/ca-certificates/m
 ENV HTTPS_PROXY=http://127.0.0.1:8080
 ENV HTTP_PROXY=http://127.0.0.1:8080
 ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 ENV NODE_EXTRA_CA_CERTS=/root/.mitmproxy/mitmproxy-ca-cert.pem
 
 EXPOSE 8080

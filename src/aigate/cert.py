@@ -9,11 +9,7 @@ from pathlib import Path
 
 MITMPROXY_CA = Path.home() / ".mitmproxy" / "mitmproxy-ca-cert.pem"
 
-ENV_LINES = [
-    '# aigate: trust mitmproxy CA for HTTPS interception',
-    f'export NODE_EXTRA_CA_CERTS="{MITMPROXY_CA}"',
-    f'export REQUESTS_CA_BUNDLE="{MITMPROXY_CA}"',
-]
+LINUX_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
 
 ENV_MARKER = "# aigate: trust mitmproxy CA"
 
@@ -46,11 +42,26 @@ def _add_to_shell_profile() -> list[str]:
             actions.append(f"Shell env vars already in {profile.name}")
             return actions
 
-    with open(profile, "a") as f:
-        f.write("\n" + "\n".join(ENV_LINES) + "\n")
+    system = platform.system()
 
-    actions.append(f"Added NODE_EXTRA_CA_CERTS to {profile.name}")
-    actions.append(f"Added REQUESTS_CA_BUNDLE to {profile.name}")
+    # NODE_EXTRA_CA_CERTS adds to existing certs, so point to mitmproxy cert directly
+    # REQUESTS_CA_BUNDLE and SSL_CERT_FILE replace the default, so point to system bundle
+    lines = [ENV_MARKER]
+    lines.append(f'export NODE_EXTRA_CA_CERTS="{MITMPROXY_CA}"')
+
+    if system == "Linux" and Path(LINUX_CA_BUNDLE).exists():
+        # System bundle already includes mitmproxy cert after update-ca-certificates
+        lines.append(f'export REQUESTS_CA_BUNDLE="{LINUX_CA_BUNDLE}"')
+        lines.append(f'export SSL_CERT_FILE="{LINUX_CA_BUNDLE}"')
+    elif system == "Darwin":
+        # macOS uses keychain, no override needed for most tools
+        # But for Python in virtualenvs, point to mitmproxy cert as extra
+        lines.append(f'export SSL_CERT_FILE="{MITMPROXY_CA}"')
+
+    with open(profile, "a") as f:
+        f.write("\n" + "\n".join(lines) + "\n")
+
+    actions.append(f"Added cert env vars to {profile.name}")
     return actions
 
 
