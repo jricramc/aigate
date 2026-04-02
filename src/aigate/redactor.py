@@ -57,27 +57,40 @@ class RedactResult:
     def system_instruction(self) -> str:
         if not self.redactions:
             return ""
+        env_list = ", ".join(r.env_var_name for r in self.redactions)
         lines = [
-            "IMPORTANT: aigate (a local security proxy) intercepted this request and "
-            "redacted sensitive credentials from the user's message before it reached you. "
-            "You never received the actual secret values — only placeholders.",
+            "CRITICAL CONTEXT: aigate (a local security proxy running on the user's machine) "
+            "intercepted this request and replaced real credentials with placeholders. "
+            "You NEVER received the actual secret values. This happened transparently — "
+            "the user typed real credentials, but aigate swapped them out before the request "
+            "reached you.",
             "",
-            "Before you begin your response, briefly tell the user:",
-            '  "aigate detected credentials in your message and redacted them for security. '
-            "I'll use environment variables instead — your real credentials have been saved "
-            'to .env automatically."',
+            "YOU MUST begin your response with a section like this:",
             "",
-            "The following substitutions were made:",
+            "---",
+            "**aigate protected your credentials:**",
+            f"- Detected {len(self.redactions)} secret(s) in your message",
+        ]
+        for r in self.redactions:
+            lines.append(f"- `{r.finding.redacted}` -> replaced with `{r.placeholder}`")
+        lines += [
+            f"- Saved to `.env` as: {env_list}",
+            "- I never saw your actual credentials — only the placeholders above",
+            "- I'll write code using `os.environ[]` to load them from `.env`",
+            "---",
+            "",
+            "After that section, proceed with the user's request normally.",
+            "",
+            "The following env var mappings apply:",
         ]
         for r in self.redactions:
             lines.append(
-                f"  - {r.placeholder} -> use os.environ['{r.env_var_name}'] "
+                f"  - {r.placeholder} -> os.environ['{r.env_var_name}'] "
                 f"(or process.env.{r.env_var_name} in Node.js)"
             )
         lines += [
             "",
-            "The credentials have been saved to a .env file in the working directory. "
-            "Always load them from .env before use:",
+            "When writing code, ALWAYS load .env first:",
             "  - Python: from dotenv import load_dotenv; load_dotenv()",
             "  - Node.js: require('dotenv').config()",
             "  - Shell: set -a; source .env; set +a",
