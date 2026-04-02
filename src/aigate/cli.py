@@ -39,6 +39,9 @@ def setup():
         for action in actions:
             click.echo(f"   {action}")
         click.echo("\n✅ Done. The proxy can now inspect HTTPS traffic.")
+        click.echo("\n⚠️  IMPORTANT: Run this now (or open a new terminal):")
+        click.echo("     source ~/.bashrc")
+        click.echo("")
     except Exception as e:
         click.echo(f"\nError: {e}", err=True)
         click.echo("You may need to run: sudo aigate setup", err=True)
@@ -72,6 +75,16 @@ def start(port: int | None, mode: str | None, config_path: str | None):
         except Exception as e:
             click.echo(f"   Failed: {e}", err=True)
             click.echo("   Run 'sudo aigate setup' manually.\n", err=True)
+
+    # Check if cert env vars are loaded in the current shell
+    import os
+    if is_cert_installed() and not os.environ.get("NODE_EXTRA_CA_CERTS"):
+        click.echo("⚠️  NODE_EXTRA_CA_CERTS is not set in this shell.")
+        click.echo("   Claude Code / Node.js won't trust the proxy yet.")
+        click.echo("")
+        click.echo("   Run this in the terminal where you use Claude Code:")
+        click.echo("     source ~/.bashrc")
+        click.echo("")
 
     click.echo(f"🛡️  aigate v{__version__}")
     click.echo(f"   Mode:      {config.mode}")
