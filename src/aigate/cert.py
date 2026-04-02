@@ -15,7 +15,7 @@ def _generate_cert_if_needed() -> None:
         return
     subprocess.run(
         ["mitmdump", "--set", "listen_port=0"],
-        timeout=3, capture_output=True,
+        timeout=15, capture_output=True,
     )
 
 
