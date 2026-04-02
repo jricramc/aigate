@@ -133,31 +133,56 @@ class AigateAddon:
             request_url=flow.request.pretty_url,
         )
 
-        rules = {f.rule for f in all_findings}
-        ctx.log.warn(
-            f"[aigate] {len(all_findings)} secret(s) detected ({', '.join(rules)}) "
-            f"-> action: {self.config.mode}"
-        )
-
         if self.config.mode == "redact":
             self._handle_redact(flow, all_findings)
         elif self.config.mode == "block":
+            self._log_banner(all_findings, "BLOCKED")
             flow.response = http.Response.make(
                 400, _build_blocked_response(all_findings), {"Content-Type": "application/json"},
             )
         elif self.config.mode == "warn":
-            for f in all_findings:
-                ctx.log.warn(f"  ! {f.rule}: {f.redacted} at {f.location}")
+            self._log_banner(all_findings, "WARNING — forwarded with secrets")
+        elif self.config.mode == "audit":
+            self._log_banner(all_findings, "AUDIT — logged only")
+
+    @staticmethod
+    def _log_banner(findings: list[Finding], action: str) -> None:
+        rules = sorted({f.rule for f in findings})
+        ctx.log.warn("")
+        ctx.log.warn("  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+        ctx.log.warn(f"  ┃  🛡️  aigate — {action:<42}┃")
+        ctx.log.warn("  ┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫")
+        ctx.log.warn(f"  ┃  Secrets found: {len(findings):<40}┃")
+        ctx.log.warn(f"  ┃  Rules:   {', '.join(rules):<47}┃")
+        for f in findings:
+            ctx.log.warn(f"  ┃    • {f.redacted:<51}┃")
+        ctx.log.warn("  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+        ctx.log.warn("")
 
     def _handle_redact(self, flow: http.HTTPFlow, findings: list[Finding]) -> None:
         result = redact_text(flow.request.get_text(), findings)
         flow.request.set_text(result.redacted_text)
 
-        for r in result.redactions:
-            ctx.log.warn(f"  ~ {r.finding.rule}: redacted -> {r.placeholder} (use {r.env_var_name})")
+        env_actions = save_to_dotenv(result.redactions)
 
-        for action in save_to_dotenv(result.redactions):
-            ctx.log.info(f"  > {action}")
+        # Flashy banner
+        ctx.log.warn("")
+        ctx.log.warn("  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+        ctx.log.warn(f"  ┃  🛡️  aigate — REDACTED {len(findings)} secret(s)               ┃")
+        ctx.log.warn("  ┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫")
+        for r in result.redactions:
+            ctx.log.warn(f"  ┃  ✂ {r.finding.redacted:<52}┃")
+            ctx.log.warn(f"  ┃    → {r.placeholder:<51}┃")
+            ctx.log.warn(f"  ┃    → saved as {r.env_var_name:<40}┃")
+        ctx.log.warn("  ┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫")
+        ctx.log.warn("  ┃  📁 .env file updated                                  ┃")
+        for a in env_actions:
+            ctx.log.warn(f"  ┃    {a:<53}┃")
+        ctx.log.warn("  ┃                                                        ┃")
+        ctx.log.warn("  ┃  📤 Sanitized request forwarded to AI                   ┃")
+        ctx.log.warn("  ┃     The AI will never see the real credentials          ┃")
+        ctx.log.warn("  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+        ctx.log.warn("")
 
         try:
             redacted_body = json.loads(flow.request.get_text())

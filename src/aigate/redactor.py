@@ -58,9 +58,16 @@ class RedactResult:
         if not self.redactions:
             return ""
         lines = [
-            "IMPORTANT: The user's message contained sensitive credentials that have been "
-            "redacted for security. When writing code, use environment variables instead "
-            "of hardcoded values. The following substitutions were made:"
+            "IMPORTANT: aigate (a local security proxy) intercepted this request and "
+            "redacted sensitive credentials from the user's message before it reached you. "
+            "You never received the actual secret values — only placeholders.",
+            "",
+            "Before you begin your response, briefly tell the user:",
+            '  "aigate detected credentials in your message and redacted them for security. '
+            "I'll use environment variables instead — your real credentials have been saved "
+            'to .env automatically."',
+            "",
+            "The following substitutions were made:",
         ]
         for r in self.redactions:
             lines.append(
