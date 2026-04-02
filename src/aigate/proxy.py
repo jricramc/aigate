@@ -102,6 +102,7 @@ class AigateAddon:
     def __init__(self, config: Config):
         self.config = config
         self.provider_hosts = set(config.providers)
+        self._seen_secrets: set[str] = set()  # track already-reported secrets
 
     def request(self, flow: http.HTTPFlow) -> None:
         if flow.request.pretty_host not in self.provider_hosts:
@@ -165,24 +166,33 @@ class AigateAddon:
 
         env_actions = save_to_dotenv(result.redactions)
 
-        # Flashy banner
-        ctx.log.warn("")
-        ctx.log.warn("  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
-        ctx.log.warn(f"  ┃  🛡️  aigate — REDACTED {len(findings)} secret(s)               ┃")
-        ctx.log.warn("  ┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫")
+        # Check for new secrets we haven't reported yet
+        new_secrets = [r for r in result.redactions if r.finding.match not in self._seen_secrets]
         for r in result.redactions:
-            ctx.log.warn(f"  ┃  ✂ {r.finding.redacted:<52}┃")
-            ctx.log.warn(f"  ┃    → {r.placeholder:<51}┃")
-            ctx.log.warn(f"  ┃    → saved as {r.env_var_name:<40}┃")
-        ctx.log.warn("  ┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫")
-        ctx.log.warn("  ┃  📁 .env file updated                                  ┃")
-        for a in env_actions:
-            ctx.log.warn(f"  ┃    {a:<53}┃")
-        ctx.log.warn("  ┃                                                        ┃")
-        ctx.log.warn("  ┃  📤 Sanitized request forwarded to AI                   ┃")
-        ctx.log.warn("  ┃     The AI will never see the real credentials          ┃")
-        ctx.log.warn("  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
-        ctx.log.warn("")
+            self._seen_secrets.add(r.finding.match)
+
+        if new_secrets:
+            # Full banner for first detection
+            ctx.log.warn("")
+            ctx.log.warn("  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+            ctx.log.warn(f"  ┃  🛡️  aigate — REDACTED {len(findings)} secret(s)               ┃")
+            ctx.log.warn("  ┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫")
+            for r in result.redactions:
+                ctx.log.warn(f"  ┃  ✂ {r.finding.redacted:<52}┃")
+                ctx.log.warn(f"  ┃    → {r.placeholder:<51}┃")
+                ctx.log.warn(f"  ┃    → saved as {r.env_var_name:<40}┃")
+            ctx.log.warn("  ┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫")
+            ctx.log.warn("  ┃  📁 .env file updated                                  ┃")
+            for a in env_actions:
+                ctx.log.warn(f"  ┃    {a:<53}┃")
+            ctx.log.warn("  ┃                                                        ┃")
+            ctx.log.warn("  ┃  📤 Sanitized request forwarded to AI                   ┃")
+            ctx.log.warn("  ┃     The AI will never see the real credentials          ┃")
+            ctx.log.warn("  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+            ctx.log.warn("")
+        else:
+            # Quiet one-liner for repeat detections (message history)
+            ctx.log.info(f"  🛡️  aigate — re-redacted {len(findings)} known secret(s)")
 
         try:
             redacted_body = json.loads(flow.request.get_text())

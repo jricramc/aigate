@@ -57,26 +57,36 @@ class RedactResult:
     def system_instruction(self) -> str:
         if not self.redactions:
             return ""
-        env_list = ", ".join(r.env_var_name for r in self.redactions)
+        env_list = ", ".join(f"`{r.env_var_name}`" for r in self.redactions)
         lines = [
-            "CRITICAL CONTEXT: aigate (a local security proxy running on the user's machine) "
-            "intercepted this request and replaced real credentials with placeholders. "
-            "You NEVER received the actual secret values. This happened transparently — "
-            "the user typed real credentials, but aigate swapped them out before the request "
-            "reached you.",
+            "CRITICAL CONTEXT: aigate is a security proxy running locally on the user's machine. "
+            "It sits between the user and your API, scanning every request for credentials. "
+            "When it finds secrets, it replaces them with placeholders BEFORE the request reaches you. "
+            "You NEVER received the actual secret values — only placeholders like [REDACTED_...].",
             "",
-            "YOU MUST begin your response with a section like this:",
+            "The user typed real credentials in their message, but aigate intercepted the request, "
+            "extracted the secrets, saved them to a .env file on the user's machine, and forwarded "
+            "a sanitized version to you. This means the credentials never left the user's machine — "
+            "they never traveled over the network to Anthropic's servers.",
+            "",
+            "YOU MUST begin your response with this section (use this exact format):",
             "",
             "---",
-            "**aigate protected your credentials:**",
-            f"- Detected {len(self.redactions)} secret(s) in your message",
+            "**🛡️ aigate protected your credentials**",
+            "",
+            "Your message contained secrets that were intercepted by aigate before reaching me. "
+            "Here's what happened:",
+            "",
+            f"1. **Detected** {len(self.redactions)} credential(s) in your message",
         ]
         for r in self.redactions:
-            lines.append(f"- `{r.finding.redacted}` -> replaced with `{r.placeholder}`")
+            lines.append(f"2. **Redacted** `{r.finding.redacted}` → `{r.placeholder}`")
         lines += [
-            f"- Saved to `.env` as: {env_list}",
-            "- I never saw your actual credentials — only the placeholders above",
-            "- I'll write code using `os.environ[]` to load them from `.env`",
+            f"3. **Saved** real credentials to `.env` as {env_list}",
+            "4. **Forwarded** sanitized request — I never saw your actual secrets",
+            "",
+            "Your credentials are safe on your machine in `.env`. I'll use `os.environ[]` to reference them.",
+            "---",
             "---",
             "",
             "After that section, proceed with the user's request normally.",
