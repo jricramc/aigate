@@ -1,0 +1,8 @@
+__pycache__/
+*.egg-info/
+.git/
+.pytest_cache/
+.venv/
+.env
+PRD.md
+STRESS_TEST_REPORT.md
