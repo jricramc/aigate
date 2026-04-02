@@ -4,27 +4,40 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
 import subprocess
 from pathlib import Path
 
 MITMPROXY_CA = Path.home() / ".mitmproxy" / "mitmproxy-ca-cert.pem"
-
 LINUX_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
-
 ENV_MARKER = "# aigate: trust mitmproxy CA"
+
+
+def _find_mitmdump() -> str:
+    """Find mitmdump binary, even inside a virtualenv."""
+    # Check if it's next to the current Python interpreter (same virtualenv)
+    import sys
+    venv_bin = Path(sys.executable).parent / "mitmdump"
+    if venv_bin.exists():
+        return str(venv_bin)
+    # Fall back to PATH
+    found = shutil.which("mitmdump")
+    if found:
+        return found
+    raise FileNotFoundError("mitmdump not found. Is mitmproxy installed?")
 
 
 def _generate_cert_if_needed() -> None:
     if MITMPROXY_CA.exists():
         return
+    mitmdump = _find_mitmdump()
     subprocess.run(
-        ["mitmdump", "--set", "listen_port=0"],
+        [mitmdump, "--set", "listen_port=0"],
         timeout=15, capture_output=True,
     )
 
 
 def _shell_profile() -> Path:
-    """Find the user's shell profile file."""
     shell = os.environ.get("SHELL", "")
     if "zsh" in shell:
         return Path.home() / ".zshrc"
@@ -32,7 +45,6 @@ def _shell_profile() -> Path:
 
 
 def _add_to_shell_profile() -> list[str]:
-    """Add cert env vars to shell profile if not already there."""
     profile = _shell_profile()
     actions: list[str] = []
 
@@ -43,19 +55,13 @@ def _add_to_shell_profile() -> list[str]:
             return actions
 
     system = platform.system()
-
-    # NODE_EXTRA_CA_CERTS adds to existing certs, so point to mitmproxy cert directly
-    # REQUESTS_CA_BUNDLE and SSL_CERT_FILE replace the default, so point to system bundle
     lines = [ENV_MARKER]
     lines.append(f'export NODE_EXTRA_CA_CERTS="{MITMPROXY_CA}"')
 
     if system == "Linux" and Path(LINUX_CA_BUNDLE).exists():
-        # System bundle already includes mitmproxy cert after update-ca-certificates
         lines.append(f'export REQUESTS_CA_BUNDLE="{LINUX_CA_BUNDLE}"')
         lines.append(f'export SSL_CERT_FILE="{LINUX_CA_BUNDLE}"')
     elif system == "Darwin":
-        # macOS uses keychain, no override needed for most tools
-        # But for Python in virtualenvs, point to mitmproxy cert as extra
         lines.append(f'export SSL_CERT_FILE="{MITMPROXY_CA}"')
 
     with open(profile, "a") as f:
@@ -88,6 +94,7 @@ def is_cert_installed() -> bool:
 
 
 def install_cert() -> list[str]:
+    """Install cert. Does NOT require sudo — handles elevation internally."""
     actions: list[str] = []
 
     _generate_cert_if_needed()
@@ -95,34 +102,47 @@ def install_cert() -> list[str]:
         return ["Error: could not generate mitmproxy CA certificate"]
 
     system = platform.system()
+    is_root = os.geteuid() == 0
 
     if system == "Darwin":
-        subprocess.run([
-            "sudo", "security", "add-trusted-cert", "-d",
+        cmd = [
+            "security", "add-trusted-cert", "-d",
             "-r", "trustRoot",
             "-k", "/Library/Keychains/System.keychain",
             str(MITMPROXY_CA),
-        ], check=True)
+        ]
+        if not is_root:
+            cmd = ["sudo"] + cmd
+        subprocess.run(cmd, check=True)
         actions.append("Added CA cert to macOS System Keychain")
 
     elif system == "Linux":
         ca_dir = Path("/usr/local/share/ca-certificates")
+        trust_dir = Path("/etc/pki/ca-trust/source/anchors")
+
         if ca_dir.exists():
-            subprocess.run(["sudo", "cp", str(MITMPROXY_CA), str(ca_dir / "mitmproxy-aigate.crt")], check=True)
-            subprocess.run(["sudo", "update-ca-certificates"], check=True)
-            actions.append("Added CA cert via update-ca-certificates")
-        else:
-            trust_dir = Path("/etc/pki/ca-trust/source/anchors")
-            if trust_dir.exists():
-                subprocess.run(["sudo", "cp", str(MITMPROXY_CA), str(trust_dir / "mitmproxy-aigate.pem")], check=True)
-                subprocess.run(["sudo", "update-ca-trust"], check=True)
-                actions.append("Added CA cert via update-ca-trust")
+            dest = str(ca_dir / "mitmproxy-aigate.crt")
+            if is_root:
+                shutil.copy2(str(MITMPROXY_CA), dest)
+                subprocess.run(["update-ca-certificates"], check=True)
             else:
-                return [f"Error: unsupported Linux distro. Manually install {MITMPROXY_CA}"]
+                subprocess.run(["sudo", "cp", str(MITMPROXY_CA), dest], check=True)
+                subprocess.run(["sudo", "update-ca-certificates"], check=True)
+            actions.append("Added CA cert via update-ca-certificates")
+        elif trust_dir.exists():
+            dest = str(trust_dir / "mitmproxy-aigate.pem")
+            if is_root:
+                shutil.copy2(str(MITMPROXY_CA), dest)
+                subprocess.run(["update-ca-trust"], check=True)
+            else:
+                subprocess.run(["sudo", "cp", str(MITMPROXY_CA), dest], check=True)
+                subprocess.run(["sudo", "update-ca-trust"], check=True)
+            actions.append("Added CA cert via update-ca-trust")
+        else:
+            return [f"Error: unsupported Linux distro. Manually install {MITMPROXY_CA}"]
     else:
         return [f"Error: unsupported OS ({system}). Manually install {MITMPROXY_CA}"]
 
-    # Add env vars to shell profile for Node.js and Python
     actions.extend(_add_to_shell_profile())
     actions.append(f"Cert location: {MITMPROXY_CA}")
     actions.append("Run 'source ~/.bashrc' or open a new terminal for env vars to take effect")
