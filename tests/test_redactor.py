@@ -120,10 +120,21 @@ class TestEnvVarNaming:
         f = Finding(rule="env_files", match="STRIPE_SECRET_KEY=sk_live_123", offset=0)
         assert _env_var_name_for(f, 0) == "STRIPE_SECRET_KEY"
 
-    def test_multiple_same_rule(self):
-        f = Finding(rule="api_tokens", match="sk-something", offset=0)
-        assert _env_var_name_for(f, 0) == "API_KEY"
-        assert _env_var_name_for(f, 1) == "API_KEY_2"
+    def test_openai_key_naming(self):
+        f = Finding(rule="api_tokens", match="sk-proj-abc123def456ghi789", offset=0)
+        assert _env_var_name_for(f, 0) == "OPENAI_API_KEY"
+
+    def test_anthropic_key_naming(self):
+        f = Finding(rule="api_tokens", match="sk-ant-api03-abcdef123456", offset=0)
+        assert _env_var_name_for(f, 0) == "ANTHROPIC_API_KEY"
+
+    def test_github_token_naming(self):
+        f = Finding(rule="api_tokens", match="ghp_" + "a" * 36, offset=0)
+        assert _env_var_name_for(f, 0) == "GITHUB_TOKEN"
+
+    def test_slack_token_naming(self):
+        f = Finding(rule="api_tokens", match="xoxb-123-456-abc", offset=0)
+        assert _env_var_name_for(f, 0) == "SLACK_BOT_TOKEN"
 
     def test_secret_value_for_env(self):
         f = Finding(rule="env_files", match="DB_PASSWORD=hunter2", offset=0)

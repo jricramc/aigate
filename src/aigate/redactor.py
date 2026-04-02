@@ -14,10 +14,28 @@ RULE_TO_ENV: dict[str, str] = {
     "private_keys": "PRIVATE_KEY",
     "api_tokens": "API_KEY",
     "env_files": "",
-    "gcp_service_accounts": "GCP_SERVICE_ACCOUNT",
-    "tailscale_keys": "TAILSCALE_KEY",
+    "gcp_service_accounts": "GOOGLE_APPLICATION_CREDENTIALS",
+    "tailscale_keys": "TAILSCALE_AUTH_KEY",
     "entropy_secrets": "SECRET",
 }
+
+# Map token prefixes to their conventional env var names
+TOKEN_PREFIX_TO_ENV: list[tuple[str, str]] = [
+    ("sk-ant-", "ANTHROPIC_API_KEY"),
+    ("sk-proj-", "OPENAI_API_KEY"),
+    ("sk-", "OPENAI_API_KEY"),
+    ("ghp_", "GITHUB_TOKEN"),
+    ("gho_", "GITHUB_TOKEN"),
+    ("ghu_", "GITHUB_TOKEN"),
+    ("ghs_", "GITHUB_TOKEN"),
+    ("github_pat_", "GITHUB_TOKEN"),
+    ("glpat-", "GITLAB_TOKEN"),
+    ("xoxb-", "SLACK_BOT_TOKEN"),
+    ("xoxp-", "SLACK_USER_TOKEN"),
+    ("xapp-", "SLACK_APP_TOKEN"),
+    ("SG.", "SENDGRID_API_KEY"),
+    ("sq0atp-", "SQUARE_ACCESS_TOKEN"),
+]
 
 _ENV_VAR_RE = re.compile(r"^([A-Z_]+)=")
 
@@ -68,6 +86,13 @@ def _env_var_name_for(finding: Finding, index: int) -> str:
         m = _ENV_VAR_RE.match(finding.match)
         if m:
             return m.group(1)
+
+    # For API tokens, match prefix to conventional env var name
+    if finding.rule == "api_tokens":
+        for prefix, env_name in TOKEN_PREFIX_TO_ENV:
+            if finding.match.startswith(prefix):
+                return env_name
+
     prefix = RULE_TO_ENV.get(finding.rule, "SECRET")
     return f"{prefix}_{index + 1}" if index > 0 else prefix
 
