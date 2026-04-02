@@ -103,6 +103,41 @@ Log file: `~/.aigate/scan.log`
 
 ## Uninstall
 
+### Remove hooks
+
 ```bash
-aigate uninstall-hook   # remove Claude Code hooks
+aigate uninstall-hook
+```
+
+### Remove proxy certificates
+
+**macOS:**
+```bash
+sudo security delete-certificate -c mitmproxy /Library/Keychains/System.keychain
+```
+
+**Linux (Debian/Ubuntu):**
+```bash
+sudo rm /usr/local/share/ca-certificates/mitmproxy-aigate.crt
+sudo update-ca-certificates --fresh
+```
+
+**Linux (RHEL/Fedora):**
+```bash
+sudo rm /etc/pki/ca-trust/source/anchors/mitmproxy-aigate.pem
+sudo update-ca-trust
+```
+
+Then remove the generated certs and env vars:
+```bash
+rm -rf ~/.mitmproxy
+```
+
+Remove the cert env vars that `aigate setup` added to your shell profile (`~/.bashrc` or `~/.zshrc`) — delete the lines after `# aigate: trust mitmproxy CA`.
+
+### Remove aigate entirely
+
+```bash
+pip uninstall aigate
+rm -rf ~/.aigate              # logs
 ```
