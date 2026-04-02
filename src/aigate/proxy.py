@@ -166,12 +166,10 @@ class AigateAddon:
 
         env_actions = save_to_dotenv(result.redactions)
 
-        # Check for new secrets we haven't reported yet
-        new_secrets = [r for r in result.redactions if r.finding.match not in self._seen_secrets]
-        for r in result.redactions:
-            self._seen_secrets.add(r.finding.match)
+        has_new = any(r.finding.match not in self._seen_secrets for r in result.redactions)
+        self._seen_secrets.update(r.finding.match for r in result.redactions)
 
-        if new_secrets:
+        if has_new:
             # Full banner for first detection
             ctx.log.warn("")
             ctx.log.warn("  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")

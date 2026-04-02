@@ -79,14 +79,14 @@ class RedactResult:
             "",
             f"1. **Detected** {len(self.redactions)} credential(s) in your message",
         ]
-        for r in self.redactions:
-            lines.append(f"2. **Redacted** `{r.finding.redacted}` → `{r.placeholder}`")
+        for i, r in enumerate(self.redactions, start=2):
+            lines.append(f"{i}. **Redacted** `{r.finding.redacted}` → `{r.placeholder}`")
+        next_step = len(self.redactions) + 2
         lines += [
-            f"3. **Saved** real credentials to `.env` as {env_list}",
-            "4. **Forwarded** sanitized request — I never saw your actual secrets",
+            f"{next_step}. **Saved** real credentials to `.env` as {env_list}",
+            f"{next_step + 1}. **Forwarded** sanitized request — I never saw your actual secrets",
             "",
             "Your credentials are safe on your machine in `.env`. I'll use `os.environ[]` to reference them.",
-            "---",
             "---",
             "",
             "After that section, proceed with the user's request normally.",

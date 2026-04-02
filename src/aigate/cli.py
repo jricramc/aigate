@@ -119,7 +119,8 @@ def start(port: int | None, mode: str | None, config_path: str | None):
 @click.argument("target", default="-")
 @click.option("--config", "-c", "config_path", type=click.Path(), default=None)
 @click.option("--json-output", "-j", is_flag=True, help="Output as JSON")
-def scan(target: str, config_path: str | None, json_output: bool):
+@click.option("--redact", "-r", is_flag=True, help="Redact secrets and save to .env")
+def scan(target: str, config_path: str | None, json_output: bool, redact: bool):
     """Scan a file or stdin for secrets."""
     config = Config.load(config_path)
 
@@ -131,16 +132,47 @@ def scan(target: str, config_path: str | None, json_output: bool):
         if not path.exists():
             click.echo(f"Error: file not found: {target}", err=True)
             sys.exit(1)
-        text = path.read_text()
+        try:
+            text = path.read_text()
+        except (UnicodeDecodeError, ValueError):
+            click.echo(f"Error: cannot scan binary file: {target}", err=True)
+            sys.exit(1)
         source = str(path)
 
     findings = scan_text(text, enabled_rules=config.rules, allowlist=config.allowlist)
 
     if not findings:
         if json_output:
-            click.echo(json.dumps({"source": source, "findings": [], "clean": True}))
+            click.echo(json.dumps({"source": source, "findings": [], "clean": True,
+                                    **({"redacted_text": text} if redact else {})}))
         else:
             click.echo(f"✅ No secrets found in {source}")
+        sys.exit(0)
+
+    if redact:
+        from aigate.redactor import redact_text, save_to_dotenv
+
+        result = redact_text(text, findings)
+        env_actions = save_to_dotenv(result.redactions)
+
+        if json_output:
+            click.echo(json.dumps({
+                "source": source,
+                "clean": False,
+                "redacted_text": result.redacted_text,
+                "redactions": [
+                    {"rule": r.finding.rule, "env_var": r.env_var_name,
+                     "placeholder": r.placeholder, "match_redacted": r.finding.redacted}
+                    for r in result.redactions
+                ],
+            }))
+        else:
+            click.echo(f"🛡️  Redacted {len(result.redactions)} secret(s) in {source}:\n")
+            for r in result.redactions:
+                click.echo(f"  {r.finding.redacted} → {r.placeholder}")
+            click.echo()
+            for a in env_actions:
+                click.echo(f"  {a}")
         sys.exit(0)
 
     if json_output:

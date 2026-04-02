@@ -31,7 +31,6 @@ DEFAULT_RULES = {
 @dataclass
 class LogConfig:
     file: str = str(DEFAULT_LOG_DIR / "scan.log")
-    format: str = "json"
 
 
 @dataclass
@@ -68,7 +67,6 @@ class Config:
             allowlist=data.get("allowlist", []),
             log=LogConfig(
                 file=log_data.get("file", str(DEFAULT_LOG_DIR / "scan.log")),
-                format=log_data.get("format", "json"),
             ),
         )
 
@@ -80,7 +78,7 @@ class Config:
                 "providers": self.providers,
                 "rules": self.rules,
                 "allowlist": self.allowlist,
-                "log": {"file": self.log.file, "format": self.log.format},
+                "log": {"file": self.log.file},
             },
             default_flow_style=False,
             sort_keys=False,

@@ -12,3 +12,4 @@ venv/
 .aigate/
 PRD.md
 STRESS_TEST_REPORT.md
+.env

@@ -31,10 +31,13 @@ def _generate_cert_if_needed() -> None:
     if MITMPROXY_CA.exists():
         return
     mitmdump = _find_mitmdump()
-    subprocess.run(
-        [mitmdump, "--set", "listen_port=0"],
-        timeout=15, capture_output=True,
-    )
+    try:
+        subprocess.run(
+            [mitmdump, "--set", "listen_port=0"],
+            timeout=5, capture_output=True,
+        )
+    except subprocess.TimeoutExpired:
+        pass  # Expected — mitmdump doesn't exit on its own, but the cert is generated
 
 
 def _shell_profile() -> Path:
@@ -102,7 +105,7 @@ def install_cert() -> list[str]:
         return ["Error: could not generate mitmproxy CA certificate"]
 
     system = platform.system()
-    is_root = os.geteuid() == 0
+    is_root = os.geteuid() == 0 if hasattr(os, "geteuid") else False
 
     if system == "Darwin":
         cmd = [

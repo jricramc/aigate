@@ -5,12 +5,10 @@ Local secret scanner that intercepts AI API calls and prevents credentials from 
 ## Install
 
 ```bash
-git clone https://github.com/jricramc/aigate.git
-cd aigate
-pip install -e .
+pip install aigate
 ```
 
-Requires Python 3.11+ and `jq`.
+Requires Python 3.11+ and `jq` (for Claude Code hooks).
 
 ## Quick start
 
@@ -20,7 +18,10 @@ Requires Python 3.11+ and `jq`.
 aigate install-hook
 ```
 
-All prompts and tool calls are scanned automatically. Secrets are blocked before Claude sees them.
+All prompts and tool calls are scanned automatically:
+
+- **Prompts** — blocked if secrets are detected (you fix and resend)
+- **Tool inputs** (Bash, Write, Edit, etc.) — secrets are redacted with env var placeholders and the tool runs with sanitized values. Real credentials are saved to `.env` automatically.
 
 ### Any AI tool (proxy mode)
 
@@ -45,6 +46,7 @@ claude                               # or any other AI tool
 ```bash
 aigate scan .env
 cat prompt.txt | aigate scan -
+aigate scan .env --redact          # redact secrets and save to .env
 ```
 
 ## Modes
@@ -98,16 +100,6 @@ aigate logs -f       # live tail
 ```
 
 Log file: `~/.aigate/scan.log`
-
-## Docker
-
-```bash
-docker build -t aigate .
-docker run --rm --entrypoint bash -it aigate
-# inside the container, everything is pre-configured:
-aigate start --mode redact &
-curl -x http://127.0.0.1:8080 ...
-```
 
 ## Uninstall
 
