@@ -24,15 +24,21 @@ All prompts and tool calls are scanned automatically. Secrets are blocked before
 
 ### Any AI tool (proxy mode)
 
+**Terminal 1 — proxy:**
 ```bash
-aigate setup                                    # one-time: installs CA cert (needs sudo)
-aigate start --mode redact                      # start the proxy
-export HTTPS_PROXY=http://127.0.0.1:8080        # in another terminal
+aigate setup                         # one-time: installs CA cert (needs sudo)
+aigate start --mode redact           # start the proxy
 ```
 
-All AI API traffic is now scanned and redacted transparently. No code changes needed.
+**Terminal 2 — your AI tool:**
+```bash
+source ~/.bashrc                     # load cert env vars (or open a new terminal)
+export HTTPS_PROXY=http://127.0.0.1:8080
+export HTTP_PROXY=http://127.0.0.1:8080
+claude                               # or any other AI tool
+```
 
-`aigate setup` installs the mitmproxy CA certificate into your system trust store and configures `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, and `REQUESTS_CA_BUNDLE` in your shell profile so Node.js (Claude Code), Python (httpx, requests), and curl all trust the proxy automatically.
+`aigate setup` installs the mitmproxy CA cert into the system trust store and adds `NODE_EXTRA_CA_CERTS` to `~/.bashrc` so Claude Code / Node.js trusts the proxy.
 
 ### Scan a file directly
 
