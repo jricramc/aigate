@@ -39,8 +39,22 @@ def setup():
         for action in actions:
             click.echo(f"   {action}")
         click.echo("\n✅ Done. The proxy can now inspect HTTPS traffic.")
-        click.echo("\n⚠️  IMPORTANT: Run this now (or open a new terminal):")
-        click.echo("     source ~/.bashrc")
+
+        # Print export commands so `eval $(aigate setup)` works
+        from aigate.cert import MITMPROXY_CA, LINUX_CA_BUNDLE
+        import platform
+        click.echo("")
+        exports = [f'export NODE_EXTRA_CA_CERTS="{MITMPROXY_CA}"']
+        if platform.system() == "Linux" and Path(LINUX_CA_BUNDLE).exists():
+            exports.append(f'export REQUESTS_CA_BUNDLE="{LINUX_CA_BUNDLE}"')
+            exports.append(f'export SSL_CERT_FILE="{LINUX_CA_BUNDLE}"')
+        else:
+            exports.append(f'export SSL_CERT_FILE="{MITMPROXY_CA}"')
+
+        click.echo("   Apply env vars now (copy-paste this, or use eval):")
+        click.echo("")
+        for exp in exports:
+            click.echo(f"   {exp}")
         click.echo("")
     except Exception as e:
         click.echo(f"\nError: {e}", err=True)
