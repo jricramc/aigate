@@ -51,6 +51,12 @@ class RedactResult:
             )
         lines += [
             "",
+            "The credentials have been saved to a .env file in the working directory. "
+            "Always load them from .env before use:",
+            "  - Python: from dotenv import load_dotenv; load_dotenv()",
+            "  - Node.js: require('dotenv').config()",
+            "  - Shell: set -a; source .env; set +a",
+            "",
             "Never output the original secret values. Always use the "
             "environment variable references above.",
         ]
