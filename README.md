@@ -1,6 +1,6 @@
 # aigate
 
-Local secret scanner that blocks credentials before they reach AI APIs.
+Local secret scanner that intercepts AI API calls and prevents credentials from leaking to LLMs.
 
 ## Install
 
@@ -12,24 +12,27 @@ pip install -e .
 
 Requires Python 3.11+ and `jq`.
 
-## Usage
+## Quick start
 
-### Claude Code
+### Claude Code (hooks — no proxy needed)
 
 ```bash
 aigate install-hook
 ```
 
-Done. All prompts and tool calls are scanned automatically.
+All prompts and tool calls are scanned automatically. Secrets are blocked before Claude sees them.
 
-### Any AI tool (Cursor, API scripts, etc.)
+### Any AI tool (proxy mode)
 
 ```bash
-aigate start                                    # starts proxy, auto-installs CA cert on first run
-export HTTPS_PROXY=http://127.0.0.1:8080        # add to ~/.bashrc to persist
+aigate setup                                    # one-time: installs CA cert (needs sudo)
+aigate start --mode redact                      # start the proxy
+export HTTPS_PROXY=http://127.0.0.1:8080        # in another terminal
 ```
 
-All AI API traffic is now scanned transparently. No code changes needed.
+All AI API traffic is now scanned and redacted transparently. No code changes needed.
+
+`aigate setup` installs the mitmproxy CA certificate into your system trust store and configures `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, and `REQUESTS_CA_BUNDLE` in your shell profile so Node.js (Claude Code), Python (httpx, requests), and curl all trust the proxy automatically.
 
 ### Scan a file directly
 
@@ -41,23 +44,44 @@ cat prompt.txt | aigate scan -
 ## Modes
 
 ```bash
-aigate start --mode block    # Block requests containing secrets (default)
-aigate start --mode redact   # Replace secrets with env var placeholders
-aigate start --mode warn     # Forward but log a warning
-aigate start --mode audit    # Forward silently, log only
+aigate start --mode block    # reject requests containing secrets (default)
+aigate start --mode redact   # replace secrets with env var placeholders
+aigate start --mode warn     # forward but log a warning
+aigate start --mode audit    # forward silently, log only
 ```
 
 ### Redact mode
 
 Instead of blocking, redact mode rewrites the request before it reaches the AI:
 
-1. Detects secrets in your prompt
-2. Replaces them with placeholders like `[REDACTED_AWS_ACCESS_KEY_ID]`
-3. Injects a system instruction telling the AI to use `os.environ[]` instead
-4. Saves the real secret to your local `.env` file
-5. Forwards the sanitized request — the AI never sees the real credential
+1. Detects secrets in your prompt (AWS keys, API tokens, database URLs, private keys, etc.)
+2. Replaces them with placeholders like `[REDACTED_ANTHROPIC_API_KEY]`
+3. Saves the real credentials to a local `.env` file
+4. Injects a system instruction telling the AI to use `os.environ[]` and load from `.env`
+5. Forwards the sanitized request — the AI never sees the real credentials
 
-The AI writes code using environment variables automatically.
+The AI acknowledges the redaction, then writes secure code using environment variables automatically. Token prefixes are mapped to conventional env var names:
+
+| Token | Env var |
+|-------|---------|
+| `sk-ant-*` | `ANTHROPIC_API_KEY` |
+| `sk-*`, `sk-proj-*` | `OPENAI_API_KEY` |
+| `ghp_*`, `github_pat_*` | `GITHUB_TOKEN` |
+| `glpat-*` | `GITLAB_TOKEN` |
+| `xoxb-*` | `SLACK_BOT_TOKEN` |
+| `SG.*` | `SENDGRID_API_KEY` |
+| `AKIA*` | `AWS_ACCESS_KEY_ID` |
+
+## Detection rules
+
+- **AWS keys** — `AKIA` access key IDs
+- **API tokens** — OpenAI, Anthropic, GitHub, GitLab, Slack, SendGrid, Square
+- **Database URLs** — postgres, mysql, mongodb, redis, amqp, mssql with credentials
+- **Private keys** — RSA, EC, DSA, OPENSSH, PGP
+- **Environment files** — `SECRET_KEY=value`, `DATABASE_URL=value`, etc.
+- **GCP service accounts** — JSON with `type: service_account` and `private_key`
+- **Tailscale keys** — `tskey-auth-*`, `tskey-api-*`
+- **High-entropy secrets** — password/token/secret fields with entropy > 3.5 bits
 
 ## Logs
 
@@ -68,6 +92,16 @@ aigate logs -f       # live tail
 ```
 
 Log file: `~/.aigate/scan.log`
+
+## Docker
+
+```bash
+docker build -t aigate .
+docker run --rm --entrypoint bash -it aigate
+# inside the container, everything is pre-configured:
+aigate start --mode redact &
+curl -x http://127.0.0.1:8080 ...
+```
 
 ## Uninstall
 
