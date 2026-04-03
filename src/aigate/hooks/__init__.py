@@ -12,11 +12,13 @@ SETTINGS_FILE = Path.home() / ".claude" / "settings.json"
 HOOK_FILES = {
     "scan_prompt.sh": "aigate-scan-prompt.sh",
     "scan_tool.sh": "aigate-scan-tool.sh",
+    "scan_output.sh": "aigate-scan-output.sh",
 }
 
 HOOK_CONFIG = {
     "UserPromptSubmit": [{"matcher": "", "hooks": [{"type": "command", "command": str(HOOKS_DIR / "aigate-scan-prompt.sh"), "timeout": 5}]}],
     "PreToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": str(HOOKS_DIR / "aigate-scan-tool.sh"), "timeout": 5}]}],
+    "PostToolUse": [{"matcher": "Write|Edit", "hooks": [{"type": "command", "command": str(HOOKS_DIR / "aigate-scan-output.sh"), "timeout": 5}]}],
 }
 
 

@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aigate"
-version = "0.2.2"
-description = "AI Prompt Secret Scanner — local proxy that blocks secrets before they reach AI APIs"
+version = "0.3.0"
+description = "AI Secret Hygiene — MCP server, proxy, and hooks that catch and remediate hardcoded secrets in AI-generated code"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [
     {name = "Jose Ramos"},
 ]
-keywords = ["security", "secrets", "ai", "proxy", "scanner", "cli", "dlp"]
+keywords = ["security", "secrets", "ai", "proxy", "scanner", "cli", "dlp", "mcp", "agent"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -31,6 +31,7 @@ dependencies = [
     "click>=8.1",
     "pyyaml>=6.0",
     "mitmproxy>=10.0",
+    "mcp>=1.0",
 ]
 
 [project.urls]
@@ -40,6 +41,7 @@ Issues = "https://github.com/joseramos/aigate/issues"
 
 [project.scripts]
 aigate = "aigate.cli:main"
+aigate-mcp = "aigate.mcp_server:run_mcp_server"
 
 [tool.setuptools.packages.find]
 where = ["src"]

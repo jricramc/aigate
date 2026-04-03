@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import json
 import sys
 from pathlib import Path
@@ -12,6 +13,11 @@ import click
 from aigate import __version__
 from aigate.config import Config, default_config_yaml, DEFAULT_CONFIG_NAME
 from aigate.scanner import scan_text
+
+
+def _line_number(text: str, offset: int) -> int:
+    """Convert a character offset to a 1-based line number."""
+    return text[:offset].count("\n") + 1
 
 
 @click.group()
@@ -263,6 +269,172 @@ def logs(num_lines: int, follow: bool):
 @main.group()
 def allowlist():
     """Manage the allowlist for false positive suppression."""
+
+
+@main.command("scan-dir")
+@click.argument("directory", default=".")
+@click.option("--config", "-c", "config_path", type=click.Path(), default=None)
+@click.option("--json-output", "-j", is_flag=True, help="Output as JSON")
+@click.option("--fix", is_flag=True, help="Replace secrets with env var references and save to .env")
+@click.option("--dry-run", is_flag=True, help="With --fix, show what would change without modifying files")
+@click.option("--ignore", multiple=True, help="Glob patterns to ignore (e.g. 'test/**')")
+def scan_dir(directory: str, config_path: str | None, json_output: bool, fix: bool, dry_run: bool, ignore: tuple):
+    """Scan a directory recursively for hardcoded secrets."""
+    from aigate.redactor import redact_text, save_to_dotenv
+
+    config = Config.load(config_path)
+    root = Path(directory).resolve()
+
+    if not root.is_dir():
+        click.echo(f"Error: not a directory: {directory}", err=True)
+        sys.exit(1)
+
+    gitignore_patterns = _load_gitignore(root)
+    ignore_patterns = list(ignore) + gitignore_patterns
+
+    all_findings = []
+    files_scanned = 0
+    files_with_secrets = 0
+
+    for filepath in _walk_files(root, ignore_patterns):
+        try:
+            text = filepath.read_text()
+        except (UnicodeDecodeError, PermissionError):
+            continue
+
+        findings = scan_text(text, enabled_rules=config.rules, allowlist=config.allowlist)
+        files_scanned += 1
+
+        if not findings:
+            continue
+
+        files_with_secrets += 1
+        rel_path = str(filepath.relative_to(root))
+
+        if fix:
+            result = redact_text(text, findings)
+
+            if not dry_run:
+                filepath.write_text(result.redacted_text)
+                save_to_dotenv(result.redactions, env_path=config.env_file)
+
+            for r in result.redactions:
+                all_findings.append({
+                    "file": rel_path,
+                    "line": _line_number(text, r.finding.offset),
+                    "rule": r.finding.rule,
+                    "match_redacted": r.finding.redacted,
+                    "env_var": r.env_var_name,
+                    "action": "would_replace" if dry_run else "replaced",
+                })
+        else:
+            for f in findings:
+                all_findings.append({
+                    "file": rel_path,
+                    "line": _line_number(text, f.offset),
+                    "rule": f.rule,
+                    "match_redacted": f.redacted,
+                })
+
+    # Output results
+    if json_output:
+        click.echo(json.dumps({
+            "directory": str(root),
+            "files_scanned": files_scanned,
+            "files_with_secrets": files_with_secrets,
+            "total_findings": len(all_findings),
+            "clean": len(all_findings) == 0,
+            "findings": all_findings,
+        }, indent=2))
+    else:
+        if not all_findings:
+            click.echo(f"✅ No secrets found in {files_scanned} files under {directory}")
+            sys.exit(0)
+
+        action_label = "would fix" if dry_run else ("fixed" if fix else "found")
+        click.echo(f"🚨 {len(all_findings)} secret(s) {action_label} in {files_with_secrets} file(s) ({files_scanned} scanned):\n")
+
+        current_file = None
+        for item in all_findings:
+            if item["file"] != current_file:
+                current_file = item["file"]
+                click.echo(f"  {current_file}:")
+            if fix or dry_run:
+                action = "→" if not dry_run else "would →"
+                click.echo(f"    L{item['line']}  [{item['rule']}] {item['match_redacted']} {action} ${item['env_var']}")
+            else:
+                click.echo(f"    L{item['line']}  [{item['rule']}] {item['match_redacted']}")
+        click.echo()
+
+    if all_findings:
+        sys.exit(1)
+
+
+def _load_gitignore(root: Path) -> list[str]:
+    """Load .gitignore patterns from the root directory."""
+    gitignore = root / ".gitignore"
+    if not gitignore.exists():
+        return []
+    patterns = []
+    for line in gitignore.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            patterns.append(line)
+    return patterns
+
+
+_SKIP_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".bmp", ".tiff", ".webp",
+    ".woff", ".woff2", ".ttf", ".eot", ".otf",
+    ".pdf", ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar",
+    ".exe", ".dll", ".so", ".dylib", ".o", ".a",
+    ".pyc", ".pyo", ".class", ".jar",
+    ".sqlite", ".db", ".sqlite3",
+    ".mp3", ".mp4", ".wav", ".avi", ".mov", ".mkv",
+    ".DS_Store",
+}
+
+_SKIP_DIRS = {
+    ".git", "node_modules", "__pycache__", ".venv", "venv", "env",
+    ".tox", ".mypy_cache", ".pytest_cache", "dist", "build",
+    ".eggs", ".egg-info", "test-venv",
+}
+
+
+def _walk_files(root: Path, ignore_patterns: list[str]) -> list[Path]:
+    """Walk directory tree, skipping binary files, hidden dirs, and ignore patterns."""
+    files = []
+    for item in sorted(root.rglob("*")):
+        if not item.is_file():
+            continue
+
+        parts = item.relative_to(root).parts
+        if any(part in _SKIP_DIRS for part in parts[:-1]):
+            continue
+
+        if item.suffix.lower() in _SKIP_EXTENSIONS:
+            continue
+
+        rel = str(item.relative_to(root))
+        if any(fnmatch.fnmatch(rel, pat) or fnmatch.fnmatch(item.name, pat) for pat in ignore_patterns):
+            continue
+
+        files.append(item)
+    return files
+
+
+@main.command("serve")
+@click.option("--config", "-c", "config_path", type=click.Path(), default=None)
+def serve(config_path: str | None):
+    """Start the AiGate MCP server (stdio transport).
+
+    This exposes aigate_scan_code, aigate_store_secret, and aigate_scan_file
+    as MCP tools that any compatible agent can call.
+    """
+    from aigate.mcp_server import run_mcp_server
+
+    click.echo("🛡️  aigate MCP server starting (stdio)...", err=True)
+    run_mcp_server(config_path)
 
 
 @allowlist.command("add")
