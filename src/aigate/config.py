@@ -40,6 +40,7 @@ class Config:
     providers: list[str] = field(default_factory=lambda: list(DEFAULT_PROVIDERS))
     rules: dict[str, bool] = field(default_factory=lambda: dict(DEFAULT_RULES))
     allowlist: list[str] = field(default_factory=list)
+    env_file: str | None = None  # auto-detect if not set
     log: LogConfig = field(default_factory=LogConfig)
 
     @classmethod
@@ -65,6 +66,7 @@ class Config:
             providers=data.get("providers", list(DEFAULT_PROVIDERS)),
             rules={**DEFAULT_RULES, **data.get("rules", {})},
             allowlist=data.get("allowlist", []),
+            env_file=data.get("env_file"),
             log=LogConfig(
                 file=log_data.get("file", str(DEFAULT_LOG_DIR / "scan.log")),
             ),
@@ -78,6 +80,7 @@ class Config:
                 "providers": self.providers,
                 "rules": self.rules,
                 "allowlist": self.allowlist,
+                **({"env_file": self.env_file} if self.env_file else {}),
                 "log": {"file": self.log.file},
             },
             default_flow_style=False,

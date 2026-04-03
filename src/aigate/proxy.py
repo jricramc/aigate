@@ -164,7 +164,7 @@ class AigateAddon:
         result = redact_text(flow.request.get_text(), findings)
         flow.request.set_text(result.redacted_text)
 
-        env_actions = save_to_dotenv(result.redactions)
+        env_actions = save_to_dotenv(result.redactions, env_path=self.config.env_file)
 
         has_new = any(r.finding.match not in self._seen_secrets for r in result.redactions)
         self._seen_secrets.update(r.finding.match for r in result.redactions)

@@ -153,7 +153,7 @@ def scan(target: str, config_path: str | None, json_output: bool, redact: bool):
         from aigate.redactor import redact_text, save_to_dotenv
 
         result = redact_text(text, findings)
-        env_actions = save_to_dotenv(result.redactions)
+        env_actions = save_to_dotenv(result.redactions, env_path=config.env_file)
 
         if json_output:
             click.echo(json.dumps({

@@ -170,8 +170,18 @@ def redact_text(text: str, findings: list[Finding]) -> RedactResult:
     return RedactResult(redacted_text=redacted, redactions=redactions)
 
 
-def save_to_dotenv(redactions: list[Redaction], env_path: str | Path = ".env") -> list[str]:
-    path = Path(env_path)
+def _find_dotenv() -> Path:
+    """Search from cwd upward for an existing .env file."""
+    cwd = Path.cwd()
+    for parent in [cwd, *cwd.parents]:
+        candidate = parent / ".env"
+        if candidate.is_file():
+            return candidate
+    return cwd / ".env"
+
+
+def save_to_dotenv(redactions: list[Redaction], env_path: str | Path | None = None) -> list[str]:
+    path = Path(env_path) if env_path is not None else _find_dotenv()
     actions: list[str] = []
 
     existing_keys: set[str] = set()

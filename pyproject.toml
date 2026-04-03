@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aigate"
-version = "0.2.1"
+version = "0.2.2"
 description = "AI Prompt Secret Scanner — local proxy that blocks secrets before they reach AI APIs"
 readme = "README.md"
 requires-python = ">=3.11"
