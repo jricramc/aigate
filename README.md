@@ -1,127 +1,48 @@
 # aigate
 
-Secret hygiene for AI-generated code. Catches hardcoded credentials before they leak — in prompts, tool inputs, generated code, and existing files.
-
-## Install
-
-```bash
-pip install aigate
-```
-
-Requires Python 3.11+ and `jq` (for hooks).
+Secret hygiene for AI-generated code. Catches hardcoded credentials in prompts, tool inputs, generated code, and existing files.
 
 ## Quick start
-
-### One command (recommended)
 
 ```bash
 pip install aigate && aigate setup-all
 ```
 
-This sets up everything:
-- HTTPS proxy (redact mode) running in the background
-- PostToolUse hook that scans files after Write/Edit
-- MCP server registered with Claude Code (3 tools for agents)
-- CA cert installed and env vars added to shell profile
+That's it. This installs a background proxy (redact mode), a PostToolUse hook for file scanning, and registers the MCP server with Claude Code. Restart your terminal for env vars to take effect.
 
-Restart Claude Code (or open a new terminal) for env vars to take effect.
+Requires Python 3.11+ and `jq`.
 
-### Hooks only (no proxy)
+## What it does
 
-```bash
-aigate install-hook
-```
+Three layers, one detection engine:
 
-Installs all three hooks:
-- **UserPromptSubmit** — blocks prompts containing secrets
-- **PreToolUse** — redacts secrets in tool inputs, saves to `.env`
-- **PostToolUse** — scans files after Write/Edit, alerts the agent to fix
+| Layer | Scope | How |
+|-------|-------|-----|
+| **Proxy** | Network-level | Intercepts HTTPS requests to AI APIs. Redacts secrets before they leave your machine. |
+| **Hooks** | Claude Code | PostToolUse scans files after Write/Edit. PreToolUse redacts tool inputs. |
+| **MCP Server** | Any agent | Three tools agents call to scan code, store secrets, and audit files. |
 
-### MCP server
-
-Register with Claude Code:
+`setup-all` installs all three. Or pick what you need:
 
 ```bash
-claude mcp add aigate aigate-mcp
+aigate install-hook              # hooks only (no proxy)
+claude mcp add aigate aigate-mcp # MCP server only
+aigate setup && aigate start     # proxy only
 ```
 
-Exposes three tools to any MCP-compatible agent:
-- **`aigate_scan_code`** — scan code for secrets before writing it
-- **`aigate_store_secret`** — save a credential to `.env` instead of hardcoding it
-- **`aigate_scan_file`** — scan an existing file for hardcoded secrets
-
-The server includes instructions that tell the agent to use these tools proactively.
-
-### Proxy only
+## Scan existing code
 
 ```bash
-aigate setup       # one-time: install CA cert (needs sudo)
-aigate start -m redact
+aigate scan-dir .                # find secrets in a directory
+aigate scan-dir . --fix --dry-run # preview what would change
+aigate scan-dir . --fix          # replace with env var refs, save to .env
 ```
 
-Set env vars in your AI tool's terminal:
-```bash
-source ~/.bashrc
-export HTTPS_PROXY=http://127.0.0.1:8080
-export HTTP_PROXY=http://127.0.0.1:8080
-```
+## Detection
 
-### Scan files directly
+AWS keys, API tokens (OpenAI, Anthropic, GitHub, GitLab, Slack, SendGrid, Square), database URLs, private keys, GCP service accounts, Tailscale keys, env file secrets, and high-entropy password/token fields.
 
-```bash
-aigate scan .env                          # scan a file
-aigate scan .env --redact                 # redact and save to .env
-aigate scan-dir .                         # scan a directory recursively
-aigate scan-dir . --fix --dry-run         # preview auto-remediation
-aigate scan-dir . --fix                   # replace secrets with env var refs
-aigate scan-dir . --ignore "test/**"      # skip patterns
-```
-
-## How the layers work together
-
-```
-                    +-------------------+
-                    |   scanner.py      |
-                    |   (detection)     |
-                    |   redactor.py     |
-                    |   (remediation)   |
-                    +--------+----------+
-                             |
-              +--------------+--------------+
-              |              |              |
-     +--------+---+  +------+------+  +----+-------+
-     |   Proxy    |  |   Hooks     |  | MCP Server |
-     | (network)  |  | (Claude CC) |  | (any agent)|
-     +------------+  +-------------+  +------------+
-```
-
-- **Proxy** — intercepts HTTPS requests to AI APIs. Redacts secrets at the network level. Can't be bypassed.
-- **Hooks** — Claude Code specific. PostToolUse scans written files. PreToolUse redacts tool inputs.
-- **MCP server** — agent-initiated. The agent calls tools to scan its own code and store secrets properly.
-
-With `setup-all`, the proxy handles prompt/tool input scanning (redact mode), and the PostToolUse hook catches secrets in generated files. The MCP server gives agents proactive scanning tools.
-
-## Proxy modes
-
-```bash
-aigate start --mode block    # reject requests containing secrets (default)
-aigate start --mode redact   # replace secrets with env var placeholders
-aigate start --mode warn     # forward but log a warning
-aigate start --mode audit    # forward silently, log only
-```
-
-## Detection rules
-
-- **AWS keys** — `AKIA` access key IDs
-- **API tokens** — OpenAI, Anthropic, GitHub, GitLab, Slack, SendGrid, Square
-- **Database URLs** — postgres, mysql, mongodb, redis, amqp, mssql with credentials
-- **Private keys** — RSA, EC, DSA, OPENSSH, PGP
-- **Environment files** — `SECRET_KEY=value`, `DATABASE_URL=value`, etc.
-- **GCP service accounts** — JSON with `type: service_account` and `private_key`
-- **Tailscale keys** — `tskey-auth-*`, `tskey-api-*`
-- **High-entropy secrets** — password/token/secret fields with entropy > 3.5 bits
-
-## Env var mapping
+Detected secrets are mapped to conventional env var names:
 
 | Token | Env var |
 |-------|---------|
@@ -133,41 +54,22 @@ aigate start --mode audit    # forward silently, log only
 | `SG.*` | `SENDGRID_API_KEY` |
 | `AKIA*` | `AWS_ACCESS_KEY_ID` |
 
-## Logs
+## Proxy modes
 
 ```bash
-aigate logs          # last 20 entries
-aigate logs -n 50    # last 50
-aigate logs -f       # live tail
+aigate start -m block    # reject requests (default)
+aigate start -m redact   # replace secrets with env var placeholders
+aigate start -m warn     # forward + log warning
+aigate start -m audit    # forward + silent log
 ```
-
-Log file: `~/.aigate/scan.log`
 
 ## Uninstall
 
 ```bash
-aigate stop-proxy                   # stop background proxy
-aigate uninstall-hook               # remove hooks
-claude mcp remove aigate            # remove MCP server
-pip uninstall aigate                # remove package
-rm -rf ~/.aigate ~/.mitmproxy       # remove logs and certs
+aigate stop-proxy && aigate uninstall-hook && claude mcp remove aigate
+pip uninstall aigate && rm -rf ~/.aigate ~/.mitmproxy
 ```
 
-Remove env vars from `~/.bashrc` or `~/.zshrc` — delete lines after `# aigate: proxy env vars` and `# aigate: trust mitmproxy CA`.
+Remove the lines after `# aigate: proxy env vars` and `# aigate: trust mitmproxy CA` from your shell profile.
 
-To remove the CA cert from the system trust store:
-
-**macOS:**
-```bash
-sudo security delete-certificate -c mitmproxy /Library/Keychains/System.keychain
-```
-
-**Linux (Debian/Ubuntu):**
-```bash
-sudo rm /usr/local/share/ca-certificates/mitmproxy-aigate.crt && sudo update-ca-certificates --fresh
-```
-
-**Linux (RHEL/Fedora):**
-```bash
-sudo rm /etc/pki/ca-trust/source/anchors/mitmproxy-aigate.pem && sudo update-ca-trust
-```
+CA cert removal — macOS: `sudo security delete-certificate -c mitmproxy /Library/Keychains/System.keychain` | Debian: `sudo rm /usr/local/share/ca-certificates/mitmproxy-aigate.crt && sudo update-ca-certificates --fresh` | RHEL: `sudo rm /etc/pki/ca-trust/source/anchors/mitmproxy-aigate.pem && sudo update-ca-trust`
