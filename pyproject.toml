@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aigate"
-version = "0.3.0"
+version = "0.3.1"
 description = "AI Secret Hygiene — MCP server, proxy, and hooks that catch and remediate hardcoded secrets in AI-generated code"
 readme = "README.md"
 requires-python = ">=3.11"
