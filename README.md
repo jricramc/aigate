@@ -1,6 +1,6 @@
 # aigate
 
-Local secret scanner that intercepts AI API calls and prevents credentials from leaking to LLMs.
+Secret hygiene for AI-generated code. Catches hardcoded credentials before they leak — in prompts, tool inputs, generated code, and existing files.
 
 ## Install
 
@@ -8,48 +8,100 @@ Local secret scanner that intercepts AI API calls and prevents credentials from 
 pip install aigate
 ```
 
-Requires Python 3.11+ and `jq` (for Claude Code hooks).
+Requires Python 3.11+ and `jq` (for hooks).
 
 ## Quick start
 
-### Claude Code (hooks — no proxy needed)
+### One command (recommended)
+
+```bash
+pip install aigate && aigate setup-all
+```
+
+This sets up everything:
+- HTTPS proxy (redact mode) running in the background
+- PostToolUse hook that scans files after Write/Edit
+- MCP server registered with Claude Code (3 tools for agents)
+- CA cert installed and env vars added to shell profile
+
+Restart Claude Code (or open a new terminal) for env vars to take effect.
+
+### Hooks only (no proxy)
 
 ```bash
 aigate install-hook
 ```
 
-All prompts and tool calls are scanned automatically:
+Installs all three hooks:
+- **UserPromptSubmit** — blocks prompts containing secrets
+- **PreToolUse** — redacts secrets in tool inputs, saves to `.env`
+- **PostToolUse** — scans files after Write/Edit, alerts the agent to fix
 
-- **Prompts** — blocked if secrets are detected (you fix and resend)
-- **Tool inputs** (Bash, Write, Edit, etc.) — secrets are redacted with env var placeholders and the tool runs with sanitized values. Real credentials are saved to `.env` automatically.
+### MCP server
 
-### Any AI tool (proxy mode)
+Register with Claude Code:
 
-**Terminal 1 — proxy:**
 ```bash
-aigate setup                         # one-time: installs CA cert (needs sudo)
-aigate start --mode redact           # start the proxy
+claude mcp add aigate aigate-mcp
 ```
 
-**Terminal 2 — your AI tool:**
+Exposes three tools to any MCP-compatible agent:
+- **`aigate_scan_code`** — scan code for secrets before writing it
+- **`aigate_store_secret`** — save a credential to `.env` instead of hardcoding it
+- **`aigate_scan_file`** — scan an existing file for hardcoded secrets
+
+The server includes instructions that tell the agent to use these tools proactively.
+
+### Proxy only
+
 ```bash
-source ~/.bashrc                     # load cert env vars (or open a new terminal)
+aigate setup       # one-time: install CA cert (needs sudo)
+aigate start -m redact
+```
+
+Set env vars in your AI tool's terminal:
+```bash
+source ~/.bashrc
 export HTTPS_PROXY=http://127.0.0.1:8080
 export HTTP_PROXY=http://127.0.0.1:8080
-claude                               # or any other AI tool
 ```
 
-`aigate setup` installs the mitmproxy CA cert into the system trust store and adds `NODE_EXTRA_CA_CERTS` to `~/.bashrc` so Claude Code / Node.js trusts the proxy.
-
-### Scan a file directly
+### Scan files directly
 
 ```bash
-aigate scan .env
-cat prompt.txt | aigate scan -
-aigate scan .env --redact          # redact secrets and save to .env
+aigate scan .env                          # scan a file
+aigate scan .env --redact                 # redact and save to .env
+aigate scan-dir .                         # scan a directory recursively
+aigate scan-dir . --fix --dry-run         # preview auto-remediation
+aigate scan-dir . --fix                   # replace secrets with env var refs
+aigate scan-dir . --ignore "test/**"      # skip patterns
 ```
 
-## Modes
+## How the layers work together
+
+```
+                    +-------------------+
+                    |   scanner.py      |
+                    |   (detection)     |
+                    |   redactor.py     |
+                    |   (remediation)   |
+                    +--------+----------+
+                             |
+              +--------------+--------------+
+              |              |              |
+     +--------+---+  +------+------+  +----+-------+
+     |   Proxy    |  |   Hooks     |  | MCP Server |
+     | (network)  |  | (Claude CC) |  | (any agent)|
+     +------------+  +-------------+  +------------+
+```
+
+- **Proxy** — intercepts HTTPS requests to AI APIs. Redacts secrets at the network level. Can't be bypassed.
+- **Hooks** — Claude Code specific. PostToolUse scans written files. PreToolUse redacts tool inputs.
+- **MCP server** — agent-initiated. The agent calls tools to scan its own code and store secrets properly.
+
+With `setup-all`, the proxy handles prompt/tool input scanning (redact mode), and the PostToolUse hook catches secrets in generated files. The MCP server gives agents proactive scanning tools.
+
+## Proxy modes
 
 ```bash
 aigate start --mode block    # reject requests containing secrets (default)
@@ -57,28 +109,6 @@ aigate start --mode redact   # replace secrets with env var placeholders
 aigate start --mode warn     # forward but log a warning
 aigate start --mode audit    # forward silently, log only
 ```
-
-### Redact mode
-
-Instead of blocking, redact mode rewrites the request before it reaches the AI:
-
-1. Detects secrets in your prompt (AWS keys, API tokens, database URLs, private keys, etc.)
-2. Replaces them with placeholders like `[REDACTED_ANTHROPIC_API_KEY]`
-3. Saves the real credentials to a local `.env` file
-4. Injects a system instruction telling the AI to use `os.environ[]` and load from `.env`
-5. Forwards the sanitized request — the AI never sees the real credentials
-
-The AI acknowledges the redaction, then writes secure code using environment variables automatically. Token prefixes are mapped to conventional env var names:
-
-| Token | Env var |
-|-------|---------|
-| `sk-ant-*` | `ANTHROPIC_API_KEY` |
-| `sk-*`, `sk-proj-*` | `OPENAI_API_KEY` |
-| `ghp_*`, `github_pat_*` | `GITHUB_TOKEN` |
-| `glpat-*` | `GITLAB_TOKEN` |
-| `xoxb-*` | `SLACK_BOT_TOKEN` |
-| `SG.*` | `SENDGRID_API_KEY` |
-| `AKIA*` | `AWS_ACCESS_KEY_ID` |
 
 ## Detection rules
 
@@ -91,11 +121,23 @@ The AI acknowledges the redaction, then writes secure code using environment var
 - **Tailscale keys** — `tskey-auth-*`, `tskey-api-*`
 - **High-entropy secrets** — password/token/secret fields with entropy > 3.5 bits
 
+## Env var mapping
+
+| Token | Env var |
+|-------|---------|
+| `sk-ant-*` | `ANTHROPIC_API_KEY` |
+| `sk-*`, `sk-proj-*` | `OPENAI_API_KEY` |
+| `ghp_*`, `github_pat_*` | `GITHUB_TOKEN` |
+| `glpat-*` | `GITLAB_TOKEN` |
+| `xoxb-*` | `SLACK_BOT_TOKEN` |
+| `SG.*` | `SENDGRID_API_KEY` |
+| `AKIA*` | `AWS_ACCESS_KEY_ID` |
+
 ## Logs
 
 ```bash
 aigate logs          # last 20 entries
-aigate logs -n 50    # last 50 entries
+aigate logs -n 50    # last 50
 aigate logs -f       # live tail
 ```
 
@@ -103,13 +145,17 @@ Log file: `~/.aigate/scan.log`
 
 ## Uninstall
 
-### Remove hooks
-
 ```bash
-aigate uninstall-hook
+aigate stop-proxy                   # stop background proxy
+aigate uninstall-hook               # remove hooks
+claude mcp remove aigate            # remove MCP server
+pip uninstall aigate                # remove package
+rm -rf ~/.aigate ~/.mitmproxy       # remove logs and certs
 ```
 
-### Remove proxy certificates
+Remove env vars from `~/.bashrc` or `~/.zshrc` — delete lines after `# aigate: proxy env vars` and `# aigate: trust mitmproxy CA`.
+
+To remove the CA cert from the system trust store:
 
 **macOS:**
 ```bash
@@ -118,26 +164,10 @@ sudo security delete-certificate -c mitmproxy /Library/Keychains/System.keychain
 
 **Linux (Debian/Ubuntu):**
 ```bash
-sudo rm /usr/local/share/ca-certificates/mitmproxy-aigate.crt
-sudo update-ca-certificates --fresh
+sudo rm /usr/local/share/ca-certificates/mitmproxy-aigate.crt && sudo update-ca-certificates --fresh
 ```
 
 **Linux (RHEL/Fedora):**
 ```bash
-sudo rm /etc/pki/ca-trust/source/anchors/mitmproxy-aigate.pem
-sudo update-ca-trust
-```
-
-Then remove the generated certs and env vars:
-```bash
-rm -rf ~/.mitmproxy
-```
-
-Remove the cert env vars that `aigate setup` added to your shell profile (`~/.bashrc` or `~/.zshrc`) — delete the lines after `# aigate: trust mitmproxy CA`.
-
-### Remove aigate entirely
-
-```bash
-pip uninstall aigate
-rm -rf ~/.aigate              # logs
+sudo rm /etc/pki/ca-trust/source/anchors/mitmproxy-aigate.pem && sudo update-ca-trust
 ```
