@@ -11,7 +11,19 @@ from aigate.config import Config
 from aigate.scanner import Finding, scan_text
 from aigate.redactor import Redaction, _env_var_name_for, save_to_dotenv
 
-mcp = FastMCP("aigate", json_response=True)
+_INSTRUCTIONS = """\
+You have access to aigate, a secret hygiene tool. Follow these rules:
+
+1. BEFORE writing any code that contains credentials, API keys, tokens, passwords, \
+or connection strings, call aigate_scan_code to check for hardcoded secrets.
+2. If aigate_scan_code returns findings, rewrite the code to use environment variables \
+as suggested, and call aigate_store_secret to save the real values to .env.
+3. When a user provides a secret value (API key, token, password) in their message, \
+use aigate_store_secret to save it to .env immediately — never write it into source code.
+4. When asked to review or audit existing files for secrets, use aigate_scan_file.
+5. Never hardcode credentials in source code. Always use environment variables."""
+
+mcp = FastMCP("aigate", instructions=_INSTRUCTIONS, json_response=True)
 
 _config: Config | None = None
 
