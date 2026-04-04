@@ -437,6 +437,191 @@ def serve(config_path: str | None):
     run_mcp_server(config_path)
 
 
+@main.command("setup-all")
+@click.option("--port", "-p", type=int, default=8080, help="Proxy port (default: 8080)")
+def setup_all(port: int):
+    """One-command setup: proxy + hook + MCP server.
+
+    Installs everything needed for full secret protection:
+    - CA cert for HTTPS interception
+    - Proxy running in background (redact mode)
+    - PostToolUse hook to scan files after Write/Edit
+    - MCP server registered with Claude Code
+
+    Usage: pip install aigate && aigate setup-all
+    """
+    import os
+    import platform
+    import shutil
+    import subprocess
+    import signal
+
+    from aigate.cert import install_cert, is_cert_installed, MITMPROXY_CA, LINUX_CA_BUNDLE, _shell_profile, ENV_MARKER
+    from aigate.hooks import install_hooks
+
+    actions: list[str] = []
+    errors: list[str] = []
+
+    # --- Step 1: CA cert ---
+    click.echo("Setting up aigate...\n")
+    click.echo("[1/5] CA certificate")
+    if is_cert_installed():
+        click.echo("   Already installed")
+    else:
+        try:
+            cert_actions = install_cert()
+            for a in cert_actions:
+                click.echo(f"   {a}")
+        except Exception as e:
+            errors.append(f"Cert install failed: {e}. Run 'sudo aigate setup' manually.")
+            click.echo(f"   Failed: {e}", err=True)
+
+    # --- Step 2: Shell env vars (proxy + cert) ---
+    click.echo("[2/5] Shell environment")
+    profile = _shell_profile()
+    profile_content = profile.read_text() if profile.exists() else ""
+
+    proxy_marker = "# aigate: proxy env vars"
+    new_lines: list[str] = []
+
+    if proxy_marker not in profile_content:
+        new_lines.append(proxy_marker)
+        new_lines.append(f'export HTTPS_PROXY="http://127.0.0.1:{port}"')
+        new_lines.append(f'export HTTP_PROXY="http://127.0.0.1:{port}"')
+
+    if ENV_MARKER not in profile_content:
+        new_lines.append(ENV_MARKER)
+        new_lines.append(f'export NODE_EXTRA_CA_CERTS="{MITMPROXY_CA}"')
+        system = platform.system()
+        if system == "Linux" and Path(LINUX_CA_BUNDLE).exists():
+            new_lines.append(f'export REQUESTS_CA_BUNDLE="{LINUX_CA_BUNDLE}"')
+            new_lines.append(f'export SSL_CERT_FILE="{LINUX_CA_BUNDLE}"')
+        else:
+            new_lines.append(f'export SSL_CERT_FILE="{MITMPROXY_CA}"')
+
+    if new_lines:
+        with open(profile, "a") as f:
+            f.write("\n" + "\n".join(new_lines) + "\n")
+        click.echo(f"   Added env vars to {profile.name}")
+    else:
+        click.echo(f"   Already configured in {profile.name}")
+
+    # Also set them in the current process so the proxy can start
+    os.environ["HTTPS_PROXY"] = f"http://127.0.0.1:{port}"
+    os.environ["HTTP_PROXY"] = f"http://127.0.0.1:{port}"
+    os.environ.setdefault("NODE_EXTRA_CA_CERTS", str(MITMPROXY_CA))
+
+    # --- Step 3: Start proxy as background daemon ---
+    click.echo("[3/5] Proxy (redact mode)")
+    pid_file = Path.home() / ".aigate" / "proxy.pid"
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Check if proxy is already running
+    proxy_running = False
+    if pid_file.exists():
+        try:
+            pid = int(pid_file.read_text().strip())
+            os.kill(pid, 0)  # Check if process exists
+            proxy_running = True
+        except (ValueError, ProcessLookupError, PermissionError):
+            pid_file.unlink(missing_ok=True)
+
+    if proxy_running:
+        click.echo(f"   Already running (pid {pid})")
+    else:
+        aigate_bin = shutil.which("aigate")
+        if not aigate_bin:
+            # Fall back to running as module
+            import sys
+            aigate_bin = sys.executable
+            proxy_cmd = [aigate_bin, "-m", "aigate.cli", "start", "-m", "redact", "-p", str(port)]
+        else:
+            proxy_cmd = [aigate_bin, "start", "-m", "redact", "-p", str(port)]
+
+        log_file = Path.home() / ".aigate" / "proxy.log"
+        with open(log_file, "a") as log_f:
+            proc = subprocess.Popen(
+                proxy_cmd,
+                stdout=log_f,
+                stderr=log_f,
+                start_new_session=True,
+            )
+        pid_file.write_text(str(proc.pid))
+        click.echo(f"   Started on port {port} (pid {proc.pid})")
+        click.echo(f"   Log: {log_file}")
+
+    # --- Step 4: PostToolUse hook only (proxy handles prompt/tool input scanning) ---
+    click.echo("[4/5] PostToolUse hook")
+    hook_actions = install_hooks(only_events={"PostToolUse"})
+    for a in hook_actions:
+        click.echo(f"   {a}")
+
+    # --- Step 5: Register MCP server with Claude Code ---
+    click.echo("[5/5] MCP server")
+    claude_bin = shutil.which("claude")
+    aigate_mcp_bin = shutil.which("aigate-mcp")
+    if claude_bin and aigate_mcp_bin:
+        result = subprocess.run(
+            [claude_bin, "mcp", "add", "aigate", aigate_mcp_bin],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            click.echo("   Registered aigate MCP server with Claude Code")
+        else:
+            # May already be registered
+            click.echo(f"   {result.stderr.strip() or result.stdout.strip() or 'Registered'}")
+    elif claude_bin:
+        # aigate-mcp not on PATH, use module invocation
+        import sys
+        mcp_cmd = f"{sys.executable} -m aigate.mcp_server"
+        result = subprocess.run(
+            [claude_bin, "mcp", "add", "aigate", "--", sys.executable, "-m", "aigate.mcp_server"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            click.echo("   Registered aigate MCP server with Claude Code")
+        else:
+            click.echo(f"   {result.stderr.strip() or result.stdout.strip() or 'Registered'}")
+    else:
+        click.echo("   Claude Code CLI not found — install it, then run:")
+        click.echo("   claude mcp add aigate aigate-mcp")
+
+    # --- Done ---
+    click.echo(f"\naigate v{__version__} is active.")
+    click.echo(f"   Proxy:     http://127.0.0.1:{port} (redact mode)")
+    click.echo(f"   Hook:      PostToolUse (scans files after Write/Edit)")
+    click.echo(f"   MCP:       3 tools available to agents")
+    click.echo(f"\nRun 'source {profile.name}' or open a new terminal to apply env vars.")
+
+    if errors:
+        click.echo("\nWarnings:", err=True)
+        for e in errors:
+            click.echo(f"   {e}", err=True)
+
+
+@main.command("stop-proxy")
+def stop_proxy():
+    """Stop the background aigate proxy."""
+    import os
+    import signal
+
+    pid_file = Path.home() / ".aigate" / "proxy.pid"
+    if not pid_file.exists():
+        click.echo("Proxy is not running (no pid file)")
+        return
+
+    try:
+        pid = int(pid_file.read_text().strip())
+        os.kill(pid, signal.SIGTERM)
+        pid_file.unlink()
+        click.echo(f"Stopped proxy (pid {pid})")
+    except (ValueError, ProcessLookupError):
+        pid_file.unlink(missing_ok=True)
+        click.echo("Proxy was not running (stale pid file removed)")
+    except PermissionError:
+        click.echo(f"Cannot stop proxy (pid {pid}) — permission denied", err=True)
+
+
 @allowlist.command("add")
 @click.argument("pattern")
 @click.option("--config", "-c", "config_path", type=click.Path(), default=None)

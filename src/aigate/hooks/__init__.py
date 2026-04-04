@@ -44,12 +44,31 @@ def _has_aigate_hook(entries: list[dict], cmds: set[str]) -> bool:
     return any(h.get("command") in cmds for entry in entries for h in entry.get("hooks", []))
 
 
-def install_hooks() -> list[str]:
+def install_hooks(only_events: set[str] | None = None) -> list[str]:
+    """Install hooks. If only_events is set, only install those hook events."""
     actions: list[str] = []
 
     HOOKS_DIR.mkdir(parents=True, exist_ok=True)
     pkg = resources.files("aigate.hooks")
+
+    # Determine which events to install
+    events_to_install = only_events or set(HOOK_CONFIG.keys())
+
+    # Map events back to which script files they need
+    needed_scripts: set[str] = set()
+    event_to_script = {
+        "UserPromptSubmit": "scan_prompt.sh",
+        "PreToolUse": "scan_tool.sh",
+        "PostToolUse": "scan_output.sh",
+    }
+    for event in events_to_install:
+        script = event_to_script.get(event)
+        if script:
+            needed_scripts.add(script)
+
     for src_name, dst_name in HOOK_FILES.items():
+        if src_name not in needed_scripts:
+            continue
         dst = HOOKS_DIR / dst_name
         dst.write_bytes((pkg / src_name).read_bytes())
         dst.chmod(0o755)
@@ -59,6 +78,8 @@ def install_hooks() -> list[str]:
     hooks = settings.setdefault("hooks", {})
 
     for event, event_hooks in HOOK_CONFIG.items():
+        if event not in events_to_install:
+            continue
         existing = hooks.get(event, [])
         if _has_aigate_hook(existing, _aigate_commands(event_hooks)):
             actions.append(f"{event} hook already configured")
