@@ -454,15 +454,12 @@ def setup_all(port: int):
     import platform
     import shutil
     import subprocess
-    import signal
 
     from aigate.cert import install_cert, is_cert_installed, MITMPROXY_CA, LINUX_CA_BUNDLE, _shell_profile, ENV_MARKER
     from aigate.hooks import install_hooks
 
-    actions: list[str] = []
     errors: list[str] = []
 
-    # --- Step 1: CA cert ---
     click.echo("Setting up aigate...\n")
     click.echo("[1/5] CA certificate")
     if is_cert_installed():
@@ -530,13 +527,10 @@ def setup_all(port: int):
         click.echo(f"   Already running (pid {pid})")
     else:
         aigate_bin = shutil.which("aigate")
-        if not aigate_bin:
-            # Fall back to running as module
-            import sys
-            aigate_bin = sys.executable
-            proxy_cmd = [aigate_bin, "-m", "aigate.cli", "start", "-m", "redact", "-p", str(port)]
-        else:
+        if aigate_bin:
             proxy_cmd = [aigate_bin, "start", "-m", "redact", "-p", str(port)]
+        else:
+            proxy_cmd = [sys.executable, "-m", "aigate.cli", "start", "-m", "redact", "-p", str(port)]
 
         log_file = Path.home() / ".aigate" / "proxy.log"
         with open(log_file, "a") as log_f:
@@ -571,9 +565,6 @@ def setup_all(port: int):
             # May already be registered
             click.echo(f"   {result.stderr.strip() or result.stdout.strip() or 'Registered'}")
     elif claude_bin:
-        # aigate-mcp not on PATH, use module invocation
-        import sys
-        mcp_cmd = f"{sys.executable} -m aigate.mcp_server"
         result = subprocess.run(
             [claude_bin, "mcp", "add", "aigate", "--", sys.executable, "-m", "aigate.mcp_server"],
             capture_output=True, text=True,
